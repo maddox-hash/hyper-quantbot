@@ -15,12 +15,15 @@ const HYPERLIQUID_API = 'https://api.hyperliquid.xyz/exchange';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Hyperliquid user-signed actions always sign with this fixed chain id
-// (421614 / 0x66eee), regardless of whether hyperliquidChain is "Mainnet" or "Testnet".
+// IMPORTANT: when signing through a real browser wallet (MetaMask/WalletConnect via
+// wagmi), domain.chainId MUST match the network the wallet is actually connected to
+// (Arbitrum One = 42161), otherwise the wallet itself rejects the request with
+// "Invalid parameters were provided to the RPC method" before it ever reaches Hyperliquid.
+// (421614 / 0x66eee is only for SDKs that sign locally with a raw private key, no wallet involved.)
 const domain = {
   name: 'HyperliquidSignTransaction',
   version: '1',
-  chainId: 421614,
+  chainId: 42161,
   verifyingContract: '0x0000000000000000000000000000000000000000',
 } as const;
 
@@ -91,7 +94,7 @@ export default function Home() {
       const agentAction = {
         type: 'approveAgent',
         hyperliquidChain: 'Mainnet',
-        signatureChainId: '0x66eee',
+        signatureChainId: '0xa4b1',
         agentAddress: agentAccount.address,
         agentName: 'HyperQuant',
         nonce: agentNonce,
@@ -115,7 +118,7 @@ export default function Home() {
       const builderAction = {
         type: 'approveBuilderFee',
         hyperliquidChain: 'Mainnet',
-        signatureChainId: '0x66eee',
+        signatureChainId: '0xa4b1',
         maxFeeRate: MAX_FEE_RATE,
         builder: BUILDER_ADDRESS,
         nonce: builderNonce,
