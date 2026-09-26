@@ -14,7 +14,6 @@ const MAX_FEE_RATE = '0.1%';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Домен для системных транзакций в Hyperliquid (используется Arbitrum)
 const domain = {
   name: 'HyperliquidSignTransaction',
   version: '1',
@@ -22,7 +21,6 @@ const domain = {
   verifyingContract: '0x0000000000000000000000000000000000000000',
 } as const;
 
-// Структура для EIP-712: Разрешение торговому агенту
 const agentTypes = {
   'HyperliquidTransaction:ApproveAgent': [
     { name: 'hyperliquidChain', type: 'string' },
@@ -32,7 +30,6 @@ const agentTypes = {
   ],
 } as const;
 
-// Структура для EIP-712: Builder Fee
 const builderFeeTypes = {
   'HyperliquidTransaction:ApproveBuilderFee': [
     { name: 'hyperliquidChain', type: 'string' },
@@ -49,40 +46,20 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
-  // Хелпер для отправки транзакций в Hyperliquid
-  const sendToHyperliquid = async (action: any, nonce: bigint, signature: string) => {
-    // Парсим hex-строку подписи на компоненты r, s, v
-    const r = signature.slice(0, 66);
-    const s = '0x' + signature.slice(66, 130);
-    const v = parseInt(signature.slice(130, 132), 16);
-
-    const res = await fetch('https://api.hyperliquid.xyz/exchange', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, nonce: Number(nonce), signature: { r, s, v } }),
-    });
-    
-    const data = await res.json();
-    if (data.status !== 'ok') {
-      throw new Error(JSON.stringify(data.response) || 'Ошибка API Hyperliquid');
-    }
-  };
-
   const handleApproveAndActivate = async () => {
     if (!address) return;
     setLoading(true);
     setStatus('Генерация торгового агента...');
 
     try {
-      // 1. Создаем локального Агента (бота), который будет торговать
+      // 1. Создаем локального Агента
       const agentPrivKey = generatePrivateKey();
       const agentAccount = privateKeyToAccount(agentPrivKey);
+      const nonce = BigInt(Date.now());
 
-      // --- ШАГ 1: Разрешаем Агенту торговать ---
+      // 2. Подпись разрешения для Агента
       setStatus('Подпишите разрешение для Агента в кошельке (1/2)...');
-      let nonce = BigInt(Date.now());
-      
-      const agentSignature = await signTypedDataAsync({
+      await signTypedDataAsync({
         domain,
         types: agentTypes,
         primaryType: 'HyperliquidTransaction:ApproveAgent',
@@ -94,21 +71,9 @@ export default function Home() {
         },
       });
 
-      setStatus('Отправка прав агента на биржу...');
-      await sendToHyperliquid({
-        type: 'approveAgent',
-        hyperliquidChain: 'Mainnet',
-        signatureChainId: '0xa4b1', // 42161 в hex (Arbitrum)
-        agentAddress: agentAccount.address,
-        agentName: 'HyperQuant',
-      }, nonce, agentSignature);
-
-
-      // --- ШАГ 2: Одобряем Builder Fee (Комиссию) ---
+      // 3. Подпись Builder Fee (комиссии)
       setStatus('Подпишите комиссию копитрейдинга в кошельке (2/2)...');
-      nonce = BigInt(Date.now());
-
-      const builderSignature = await signTypedDataAsync({
+      await signTypedDataAsync({
         domain,
         types: builderFeeTypes,
         primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
@@ -116,21 +81,11 @@ export default function Home() {
           hyperliquidChain: 'Mainnet',
           maxFeeRate: MAX_FEE_RATE,
           builder: BUILDER_ADDRESS as `0x${string}`,
-          nonce,
+          nonce: BigInt(Date.now()),
         },
       });
 
-      setStatus('Отправка комиссии на биржу...');
-      await sendToHyperliquid({
-        type: 'approveBuilderFee',
-        hyperliquidChain: 'Mainnet',
-        signatureChainId: '0xa4b1',
-        maxFeeRate: MAX_FEE_RATE,
-        builder: BUILDER_ADDRESS,
-      }, nonce, builderSignature);
-
-
-      // --- ШАГ 3: Сохраняем в Supabase ---
+      // 4. Сохраняем все данные в базу Supabase для нашего Python-бота
       setStatus('Сохранение данных в базу...');
       const { error } = await supabase.from('subscribers').upsert({
         main_wallet: address.toLowerCase(),
