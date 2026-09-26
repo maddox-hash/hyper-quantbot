@@ -256,7 +256,7 @@ export default function Home() {
             margin: '0 0 28px',
           }}
         >
-          Connect your wallet and activate copy trading
+          Algorithmic Trading System
         </p>
 
         <div style={{ textAlign: 'left', marginBottom: '18px' }}>
