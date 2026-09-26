@@ -4,20 +4,11 @@ import { useState } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useSignTypedData } from 'wagmi';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { createClient } from '@supabase/supabase-js';
-
-// --- НАСТРОЙКИ ---
-const SUPABASE_URL = 'https://qqimpejopfpdbnwvaibv.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxaW1wZWpvcGZwZGJud3ZhaWJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA0MTg2MTYsImV4cCI6MjEwNTk5NDYxNn0.Ji9ePqo2Y8KtPwQ2PnkzZpNWnQNZUP_5MhA_vuuSz_8';
-const BUILDER_ADDRESS = '0x8E5B541b59C43cCD688215C1c52CB6E4B885D5e9';
-const MAX_FEE_RATE = '0.1%'; 
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const domain = {
   name: 'HyperliquidSignTransaction',
   version: '1',
-  chainId: 42161, // Arbitrum One
+  chainId: 42161,
   verifyingContract: '0x0000000000000000000000000000000000000000',
 } as const;
 
@@ -26,15 +17,6 @@ const agentTypes = {
     { name: 'hyperliquidChain', type: 'string' },
     { name: 'agentAddress', type: 'address' },
     { name: 'agentName', type: 'string' },
-    { name: 'nonce', type: 'uint64' },
-  ],
-} as const;
-
-const builderFeeTypes = {
-  'HyperliquidTransaction:ApproveBuilderFee': [
-    { name: 'hyperliquidChain', type: 'string' },
-    { name: 'maxFeeRate', type: 'string' },
-    { name: 'builder', type: 'address' },
     { name: 'nonce', type: 'uint64' },
   ],
 } as const;
@@ -52,14 +34,12 @@ export default function Home() {
     setStatus('Генерация торгового агента...');
 
     try {
-      // 1. Создаем локального Агента
       const agentPrivKey = generatePrivateKey();
       const agentAccount = privateKeyToAccount(agentPrivKey);
-      const nonce = BigInt(Date.now());
+      const nonce = Date.now();
 
-      // 2. Подпись разрешения для Агента
-      setStatus('Подпишите разрешение для Агента в кошельке (1/2)...');
-      await signTypedDataAsync({
+      setStatus('Подпишите разрешение для Агента в кошельке...');
+      const signature = await signTypedDataAsync({
         domain,
         types: agentTypes,
         primaryType: 'HyperliquidTransaction:ApproveAgent',
@@ -67,39 +47,30 @@ export default function Home() {
           hyperliquidChain: 'Mainnet',
           agentAddress: agentAccount.address as `0x${string}`,
           agentName: 'HyperQuant',
+          nonce: BigInt(nonce),
+        },
+      });
+
+      setStatus('Регистрация агента на Hyperliquid...');
+      const res = await fetch('/api/activate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mainWallet: address,
+          agentAddress: agentAccount.address,
+          agentPrivateKey: agentPrivKey,
+          agentSignature: signature,
           nonce,
-        },
+        }),
       });
 
-      // 3. Подпись Builder Fee (комиссии)
-      setStatus('Подпишите комиссию копитрейдинга в кошельке (2/2)...');
-      await signTypedDataAsync({
-        domain,
-        types: builderFeeTypes,
-        primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
-        message: {
-          hyperliquidChain: 'Mainnet',
-          maxFeeRate: MAX_FEE_RATE,
-          builder: BUILDER_ADDRESS as `0x${string}`,
-          nonce: BigInt(Date.now()),
-        },
-      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Ошибка при активации');
 
-      // 4. Сохраняем все данные в базу Supabase для нашего Python-бота
-      setStatus('Сохранение данных в базу...');
-      const { error } = await supabase.from('subscribers').upsert({
-        main_wallet: address.toLowerCase(),
-        agent_address: agentAccount.address.toLowerCase(),
-        agent_private_key: agentPrivKey,
-        builder_fee_approved: true,
-      }, { onConflict: 'main_wallet' });
-
-      if (error) throw error;
-
-      setStatus('Успешно! Ваш аккаунт активирован.');
+      setStatus('Успешно! Агент создан и зарегистрирован на Hyperliquid.');
     } catch (err: any) {
       console.error(err);
-      setStatus(`Ошибка: ${err.shortMessage || err.message || 'Отказ от подписи'}`);
+      setStatus(`Ошибка: ${err.message || 'Отказ от подписи'}`);
     } finally {
       setLoading(false);
     }
