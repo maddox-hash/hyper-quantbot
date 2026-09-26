@@ -66,62 +66,6 @@ async function submitToHyperliquid(
   return data;
 }
 
-function LogoIcon() {
-  return (
-    <svg
-      width="56"
-      height="56"
-      viewBox="0 0 56 56"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-    >
-      <defs>
-        <linearGradient id="hqGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#00f2fe" />
-          <stop offset="100%" stopColor="#4facfe" />
-        </linearGradient>
-        <filter id="hqGlow" x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur stdDeviation="2.5" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
-      <rect
-        x="2"
-        y="2"
-        width="52"
-        height="52"
-        rx="14"
-        stroke="url(#hqGrad)"
-        strokeWidth="1.5"
-        fill="rgba(0, 242, 254, 0.06)"
-      />
-      <path
-        d="M14 36 L22 28 L28 32 L38 18"
-        stroke="url(#hqGrad)"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-        filter="url(#hqGlow)"
-      />
-      <path
-        d="M34 18 L38 18 L38 22"
-        stroke="url(#hqGrad)"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-        filter="url(#hqGlow)"
-      />
-      <circle cx="38" cy="18" r="2.5" fill="#00f2fe" filter="url(#hqGlow)" />
-    </svg>
-  );
-}
-
 export default function Home() {
   const { address, isConnected } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
@@ -222,7 +166,7 @@ export default function Home() {
         padding: '24px 16px',
         boxSizing: 'border-box',
         background:
-          'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0, 242, 254, 0.12), transparent), #0b0e14',
+          'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(46, 230, 197, 0.12), transparent), #0b0e14',
       }}
     >
       <div
@@ -232,7 +176,7 @@ export default function Home() {
           inset: 0,
           pointerEvents: 'none',
           background:
-            'radial-gradient(circle at 20% 80%, rgba(79, 172, 254, 0.06), transparent 40%), radial-gradient(circle at 80% 20%, rgba(0, 242, 254, 0.05), transparent 35%)',
+            'radial-gradient(circle at 20% 80%, rgba(94, 240, 212, 0.06), transparent 40%), radial-gradient(circle at 80% 20%, rgba(46, 230, 197, 0.05), transparent 35%)',
         }}
       />
 
@@ -247,7 +191,7 @@ export default function Home() {
           width: '100%',
           textAlign: 'center',
           boxShadow:
-            '0 0 0 1px rgba(0, 242, 254, 0.04), 0 20px 50px rgba(0, 0, 0, 0.45), 0 0 80px rgba(0, 242, 254, 0.04)',
+            '0 0 0 1px rgba(46, 230, 197, 0.04), 0 20px 50px rgba(0, 0, 0, 0.45), 0 0 80px rgba(46, 230, 197, 0.04)',
         }}
       >
         <div
@@ -260,13 +204,34 @@ export default function Home() {
             width: '40%',
             height: '2px',
             borderRadius: '0 0 2px 2px',
-            background: 'linear-gradient(90deg, transparent, #00f2fe, #4facfe, transparent)',
+            background: 'linear-gradient(90deg, transparent, #2ee6c5, #5ef0d4, transparent)',
             opacity: 0.7,
           }}
         />
 
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
-          <LogoIcon />
+          <div
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 16,
+              overflow: 'hidden',
+              border: '1px solid rgba(46, 230, 197, 0.35)',
+              boxShadow: '0 0 24px rgba(46, 230, 197, 0.18), inset 0 0 0 1px rgba(46, 230, 197, 0.08)',
+              background: '#05080c',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <img
+              src="/iconhq.png"
+              alt="Hyper Quant"
+              width={56}
+              height={56}
+              style={{ display: 'block', objectFit: 'contain' }}
+            />
+          </div>
         </div>
 
         <h1
@@ -275,7 +240,7 @@ export default function Home() {
             fontWeight: 700,
             margin: '0 0 8px',
             letterSpacing: '-0.02em',
-            background: 'linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)',
+            background: 'linear-gradient(90deg, #2ee6c5 0%, #5ef0d4 100%)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
@@ -347,8 +312,8 @@ export default function Home() {
                 transition: 'border-color 0.15s, box-shadow 0.15s',
               }}
               onFocus={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(0, 242, 254, 0.45)';
-                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(0, 242, 254, 0.1)';
+                e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
+                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(46, 230, 197, 0.1)';
               }}
               onBlur={(e) => {
                 e.currentTarget.style.borderColor = '#30363d';
@@ -360,11 +325,15 @@ export default function Home() {
             style={{
               margin: '8px 0 0',
               fontSize: '12px',
-              color: '#6e7681',
-              lineHeight: 1.4,
+              color: '#8b949e',
+              lineHeight: 1.5,
             }}
           >
-            Open the Telegram bot and copy the ID it shows you.
+            <span style={{ color: '#e3b341', fontWeight: 600 }}>Note:</span>{' '}
+            Enter your Telegram ID if you have an active paid subscription.
+            Leave this field empty on the free plan — a builder fee of{' '}
+            <span style={{ color: '#2ee6c5' }}>0.01%</span> will apply
+            (up to <span style={{ color: '#2ee6c5' }}>0.03%</span> for our MVP Quant Bot).
           </p>
         </div>
 
@@ -394,7 +363,7 @@ export default function Home() {
                 border: 'none',
                 background: loading
                   ? '#30363d'
-                  : 'linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)',
+                  : 'linear-gradient(90deg, #2ee6c5 0%, #5ef0d4 100%)',
                 color: loading ? '#8b949e' : '#0b0e14',
                 fontWeight: 700,
                 fontSize: '15px',
@@ -403,7 +372,7 @@ export default function Home() {
                 transition: 'opacity 0.2s, transform 0.15s',
                 boxShadow: loading
                   ? 'none'
-                  : '0 4px 20px rgba(0, 242, 254, 0.25)',
+                  : '0 4px 20px rgba(46, 230, 197, 0.25)',
               }}
               onMouseEnter={(e) => {
                 if (!loading) e.currentTarget.style.opacity = '0.92';
@@ -442,13 +411,22 @@ export default function Home() {
             gap: '8px',
           }}
         >
+          <style>{`
+            @keyframes hqPulse {
+              0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(63, 185, 80, 0.7); transform: scale(1); }
+              50% { opacity: 0.35; box-shadow: 0 0 2px rgba(63, 185, 80, 0.25); transform: scale(0.85); }
+            }
+          `}</style>
           <span
             style={{
-              width: '6px',
-              height: '6px',
+              width: '7px',
+              height: '7px',
               borderRadius: '50%',
               background: '#3fb950',
               boxShadow: '0 0 8px rgba(63, 185, 80, 0.6)',
+              animation: 'hqPulse 1.6s ease-in-out infinite',
+              display: 'inline-block',
+              flexShrink: 0,
             }}
           />
           <span style={{ fontSize: '12px', color: '#6e7681' }}>
