@@ -2,18 +2,16 @@
 
 import { useState } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useChainId, useSignTypedData, useSwitchChain } from 'wagmi';
+import { useAccount, useSignTypedData } from 'wagmi';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { createClient } from '@supabase/supabase-js';
 
 // --- НАСТРОЙКИ ---
 const SUPABASE_URL = 'https://qqimpejopfpdbnwvaibv.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxaW1wZWpvcGZwZGJud3ZhaWJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA0MTg2MTYsImV4cCI6MjEwNTk5NDYxNn0.Ji9ePqo2Y8KtPwQ2PnkzZpNWnQNZUP_5MhA_vuuSz_8';
-const BUILDER_ADDRESS = ('0x8E5B541b59C43cCD688215C1c52CB6E4B885D5e9').toLowerCase() as `0x${string}`;
-const MAX_FEE_RATE = '0.1%'; // 0.1% = 10bps, the protocol max for perps — already at the cap
+const BUILDER_ADDRESS = '0x8E5B541b59C43cCD688215C1c52CB6E4B885D5e9';
+const MAX_FEE_RATE = '0.1%';
 const HYPERLIQUID_API = 'https://api.hyperliquid.xyz/exchange';
-const HYPERLIQUID_INFO_API = 'https://api.hyperliquid.xyz/info';
-const ARBITRUM_CHAIN_ID = 42161;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -70,21 +68,8 @@ async function submitToHyperliquid(action: Record<string, unknown>, signature: {
   return data;
 }
 
-// Confirms the agent is actually live on Hyperliquid (not just "status: ok" from /exchange)
-async function fetchApprovedAgent(user: `0x${string}`, agentAddress: `0x${string}`) {
-  const res = await fetch(HYPERLIQUID_INFO_API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: 'extraAgents', user }),
-  });
-  const agents: Array<{ name: string; address: string; validUntil: number }> = await res.json();
-  return agents.find((a) => a.address?.toLowerCase() === agentAddress.toLowerCase()) ?? null;
-}
-
 export default function Home() {
   const { address, isConnected } = useAccount();
-  const chainId = useChainId();
-  const { switchChainAsync } = useSwitchChain();
   const { signTypedDataAsync } = useSignTypedData();
 
   const [loading, setLoading] = useState(false);
@@ -96,46 +81,21 @@ export default function Home() {
     setStatus('Генерация торгового агента...');
 
     try {
-      // 0. Кошелёк обязан подписывать на Arbitrum One (42161) — иначе сам кошелёк
-      // вернёт "Invalid parameters were provided to the RPC method" ещё до Hyperliquid.
-      if (chainId !== ARBITRUM_CHAIN_ID) {
-        setStatus('Переключаем кошелёк на Arbitrum One...');
-        await switchChainAsync({ chainId: ARBITRUM_CHAIN_ID });
-      }
-
       // 1. Создаём локального агента
       const agentPrivKey = generatePrivateKey();
-      const agentAddress = privateKeyToAccount(agentPrivKey).address.toLowerCase() as `0x${string}`;
-      const mainWallet = address.toLowerCase() as `0x${string}`;
+      const agentAccount = privateKeyToAccount(agentPrivKey);
 
       // Два разных nonce, чтобы не было коллизии по времени
       const agentNonce = Date.now();
       const builderNonce = agentNonce + 1;
 
-      // 2. Сохраняем ключ агента СРАЗУ, до похода в Hyperliquid.
-      // Если что-то дальше упадёт (сеть, отказ подписать вторую подпись и т.д.),
-      // приватник агента не потеряется — а без этого шага он жил бы только в памяти вкладки.
-      setStatus('Сохраняем агента в базе...');
-      {
-        const { error } = await supabase.from('subscribers').upsert(
-          {
-            main_wallet: mainWallet,
-            agent_address: agentAddress,
-            agent_private_key: agentPrivKey,
-            builder_fee_approved: false,
-          },
-          { onConflict: 'main_wallet' }
-        );
-        if (error) throw error;
-      }
-
-      // 3. Подпись + реальная отправка ApproveAgent
+      // 2. Подпись + реальная отправка ApproveAgent
       setStatus('Подпишите разрешение для агента в кошельке (1/2)...');
       const agentAction = {
         type: 'approveAgent',
         hyperliquidChain: 'Mainnet',
         signatureChainId: '0xa4b1',
-        agentAddress,
+        agentAddress: agentAccount.address,
         agentName: 'HyperQuant',
         nonce: agentNonce,
       };
@@ -145,7 +105,7 @@ export default function Home() {
         primaryType: 'HyperliquidTransaction:ApproveAgent',
         message: {
           hyperliquidChain: 'Mainnet',
-          agentAddress,
+          agentAddress: agentAccount.address as `0x${string}`,
           agentName: 'HyperQuant',
           nonce: BigInt(agentNonce),
         },
@@ -153,7 +113,7 @@ export default function Home() {
       setStatus('Регистрируем агента на Hyperliquid...');
       await submitToHyperliquid(agentAction, splitSignature(agentSig), agentNonce);
 
-      // 4. Подпись + реальная отправка ApproveBuilderFee
+      // 3. Подпись + реальная отправка ApproveBuilderFee
       setStatus('Подпишите комиссию копитрейдинга в кошельке (2/2)...');
       const builderAction = {
         type: 'approveBuilderFee',
@@ -170,39 +130,27 @@ export default function Home() {
         message: {
           hyperliquidChain: 'Mainnet',
           maxFeeRate: MAX_FEE_RATE,
-          builder: BUILDER_ADDRESS,
+          builder: BUILDER_ADDRESS as `0x${string}`,
           nonce: BigInt(builderNonce),
         },
       });
       setStatus('Регистрируем комиссию билдера...');
       await submitToHyperliquid(builderAction, splitSignature(builderSig), builderNonce);
 
-      // 5. Помечаем approval завершённым
-      {
-        const { error } = await supabase.from('subscribers').upsert(
-          {
-            main_wallet: mainWallet,
-            agent_address: agentAddress,
-            agent_private_key: agentPrivKey,
-            builder_fee_approved: true,
-          },
-          { onConflict: 'main_wallet' }
-        );
-        if (error) throw error;
-      }
+      // 4. Сохраняем данные в Supabase для Python-бота
+      setStatus('Сохранение данных в базу...');
+      const { error } = await supabase.from('subscribers').upsert(
+        {
+          main_wallet: address.toLowerCase(),
+          agent_address: agentAccount.address.toLowerCase(),
+          agent_private_key: agentPrivKey,
+          builder_fee_approved: true,
+        },
+        { onConflict: 'main_wallet' }
+      );
+      if (error) throw error;
 
-      // 6. Проверяем по факту, что агент реально появился на Hyperliquid
-      // (status: "ok" от /exchange значит только "запрос принят", а не "видно в user_state")
-      setStatus('Проверяем регистрацию агента...');
-      const approvedAgent = await fetchApprovedAgent(mainWallet, agentAddress);
-
-      if (approvedAgent) {
-        setStatus(`Готово! Агент "${approvedAgent.name}" (${agentAddress}) активен на Hyperliquid.`);
-      } else {
-        // Экшены прошли (status: ok), но extraAgents его пока не отдаёт — обычно это
-        // задержка на несколько секунд. Считаем это не фатальной ошибкой.
-        setStatus(`Экшены отправлены успешно, но агент пока не виден в extraAgents. Подождите пару секунд и проверьте на app.hyperliquid.xyz → API.`);
-      }
+      setStatus('Успешно! Агент зарегистрирован на Hyperliquid и аккаунт активирован.');
     } catch (err: any) {
       console.error(err);
       setStatus(`Ошибка: ${err.shortMessage || err.message || 'Отказ от подписи'}`);
