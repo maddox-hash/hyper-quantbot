@@ -4,22 +4,16 @@ import { useState } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useSignTypedData } from 'wagmi';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { createClient } from '@supabase/supabase-js';
 
-// --- НАСТРОЙКИ ---
-//const SUPABASE_URL = 'https://qqimpejopfpdbnwvaibv.supabase.co';
-//const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxaW1wZWpvcGZwZGJud3ZhaWJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA0MTg2MTYsImV4cCI6MjEwNTk5NDYxNn0.Ji9ePqo2Y8KtPwQ2PnkzZpNWnQNZUP_5MhA_vuuSz_8';
+// --- SETTINGS ---
 const BUILDER_ADDRESS = '0x8E5B541b59C43cCD688215C1c52CB6E4B885D5e9';
 const MAX_FEE_RATE = '0.1%';
 const HYPERLIQUID_API = 'https://api.hyperliquid.xyz/exchange';
-
-//const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // IMPORTANT: when signing through a real browser wallet (MetaMask/WalletConnect via
 // wagmi), domain.chainId MUST match the network the wallet is actually connected to
 // (Arbitrum One = 42161), otherwise the wallet itself rejects the request with
 // "Invalid parameters were provided to the RPC method" before it ever reaches Hyperliquid.
-// (421614 / 0x66eee is only for SDKs that sign locally with a raw private key, no wallet involved.)
 const domain = {
   name: 'HyperliquidSignTransaction',
   version: '1',
@@ -45,7 +39,6 @@ const builderFeeTypes = {
   ],
 } as const;
 
-// Splits a 65-byte ECDSA signature (0x + 130 hex chars) into r/s/v for Hyperliquid's API
 function splitSignature(signature: `0x${string}`) {
   return {
     r: signature.slice(0, 66) as `0x${string}`,
@@ -54,8 +47,11 @@ function splitSignature(signature: `0x${string}`) {
   };
 }
 
-// Posts a signed user action to Hyperliquid so it actually takes effect
-async function submitToHyperliquid(action: Record<string, unknown>, signature: { r: string; s: string; v: number }, nonce: number) {
+async function submitToHyperliquid(
+  action: Record<string, unknown>,
+  signature: { r: string; s: string; v: number },
+  nonce: number
+) {
   const res = await fetch(HYPERLIQUID_API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -63,34 +59,90 @@ async function submitToHyperliquid(action: Record<string, unknown>, signature: {
   });
   const data = await res.json();
   if (data.status !== 'ok') {
-    throw new Error(data.response ? JSON.stringify(data.response) : 'Hyperliquid API rejected the action');
+    throw new Error(
+      data.response ? JSON.stringify(data.response) : 'Hyperliquid API rejected the action'
+    );
   }
   return data;
+}
+
+function LogoIcon() {
+  return (
+    <svg
+      width="56"
+      height="56"
+      viewBox="0 0 56 56"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id="hqGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#00f2fe" />
+          <stop offset="100%" stopColor="#4facfe" />
+        </linearGradient>
+        <filter id="hqGlow" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="2.5" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+      <rect
+        x="2"
+        y="2"
+        width="52"
+        height="52"
+        rx="14"
+        stroke="url(#hqGrad)"
+        strokeWidth="1.5"
+        fill="rgba(0, 242, 254, 0.06)"
+      />
+      <path
+        d="M14 36 L22 28 L28 32 L38 18"
+        stroke="url(#hqGrad)"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+        filter="url(#hqGlow)"
+      />
+      <path
+        d="M34 18 L38 18 L38 22"
+        stroke="url(#hqGrad)"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+        filter="url(#hqGlow)"
+      />
+      <circle cx="38" cy="18" r="2.5" fill="#00f2fe" filter="url(#hqGlow)" />
+    </svg>
+  );
 }
 
 export default function Home() {
   const { address, isConnected } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
 
+  const [telegramId, setTelegramId] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
   const handleApproveAndActivate = async () => {
     if (!address) return;
     setLoading(true);
-    setStatus('Генерация торгового агента...');
+    setStatus('Generating trading agent...');
 
     try {
-      // 1. Создаём локального агента
       const agentPrivKey = generatePrivateKey();
       const agentAccount = privateKeyToAccount(agentPrivKey);
 
-      // Два разных nonce, чтобы не было коллизии по времени
       const agentNonce = Date.now();
       const builderNonce = agentNonce + 1;
 
-      // 2. Подпись + реальная отправка ApproveAgent
-      setStatus('Подпишите разрешение для агента в кошельке (1/2)...');
+      setStatus('Sign agent approval in your wallet (1/2)...');
       const agentAction = {
         type: 'approveAgent',
         hyperliquidChain: 'Mainnet',
@@ -110,11 +162,10 @@ export default function Home() {
           nonce: BigInt(agentNonce),
         },
       });
-      setStatus('Регистрируем агента на Hyperliquid...');
+      setStatus('Registering agent on Hyperliquid...');
       await submitToHyperliquid(agentAction, splitSignature(agentSig), agentNonce);
 
-      // 3. Подпись + реальная отправка ApproveBuilderFee
-      setStatus('Подпишите комиссию копитрейдинга в кошельке (2/2)...');
+      setStatus('Sign builder fee approval in your wallet (2/2)...');
       const builderAction = {
         type: 'approveBuilderFee',
         hyperliquidChain: 'Mainnet',
@@ -134,26 +185,27 @@ export default function Home() {
           nonce: BigInt(builderNonce),
         },
       });
-      setStatus('Регистрируем комиссию билдера...');
+      setStatus('Registering builder fee...');
       await submitToHyperliquid(builderAction, splitSignature(builderSig), builderNonce);
 
-      // 4. Сохраняем данные в Supabase для Python-бота
-      // 4. Сохраняем данные через API
-setStatus('Сохранение данных в базу...');
-const res = await fetch('/api/activate', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    main_wallet: address,
-    agent_address: agentAccount.address,
-    agent_private_key: agentPrivKey,
-  }),
-});
+      setStatus('Saving data...');
+      const res = await fetch('/api/activate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          main_wallet: address,
+          agent_address: agentAccount.address,
+          agent_private_key: agentPrivKey,
+        }),
+      });
 
-const data = await res.json();
-if (!res.ok) throw new Error(data.error || 'Ошибка сохранения');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save data');
 
-  
+      setStatus('Activated successfully. You can return to Telegram.');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Something went wrong';
+      setStatus(`Error: ${message}`);
     } finally {
       setLoading(false);
     }
@@ -162,32 +214,172 @@ if (!res.ok) throw new Error(data.error || 'Ошибка сохранения');
   return (
     <main
       style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        justifyContent: 'center', minHeight: '100vh', padding: '20px', boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '100vh',
+        padding: '24px 16px',
+        boxSizing: 'border-box',
+        background:
+          'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0, 242, 254, 0.12), transparent), #0b0e14',
       }}
     >
       <div
+        aria-hidden
         style={{
-          background: '#161b22', border: '1px solid #30363d', borderRadius: '16px',
-          padding: '40px 30px', maxWidth: '420px', width: '100%', textAlign: 'center',
-          boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+          position: 'fixed',
+          inset: 0,
+          pointerEvents: 'none',
+          background:
+            'radial-gradient(circle at 20% 80%, rgba(79, 172, 254, 0.06), transparent 40%), radial-gradient(circle at 80% 20%, rgba(0, 242, 254, 0.05), transparent 35%)',
+        }}
+      />
+
+      <div
+        style={{
+          position: 'relative',
+          background: 'linear-gradient(165deg, #161b22 0%, #0f1318 100%)',
+          border: '1px solid rgba(48, 54, 61, 0.9)',
+          borderRadius: '20px',
+          padding: '40px 28px 36px',
+          maxWidth: '420px',
+          width: '100%',
+          textAlign: 'center',
+          boxShadow:
+            '0 0 0 1px rgba(0, 242, 254, 0.04), 0 20px 50px rgba(0, 0, 0, 0.45), 0 0 80px rgba(0, 242, 254, 0.04)',
         }}
       >
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: '40%',
+            height: '2px',
+            borderRadius: '0 0 2px 2px',
+            background: 'linear-gradient(90deg, transparent, #00f2fe, #4facfe, transparent)',
+            opacity: 0.7,
+          }}
+        />
+
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+          <LogoIcon />
+        </div>
+
         <h1
           style={{
-            fontSize: '28px', fontWeight: '700', marginBottom: '8px',
+            fontSize: '26px',
+            fontWeight: 700,
+            margin: '0 0 8px',
+            letterSpacing: '-0.02em',
             background: 'linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)',
-            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
           }}
         >
           HYPER QUANT
         </h1>
-        <p style={{ color: '#8b949e', fontSize: '14px', marginBottom: '28px' }}>
-          Подключите кошелек и активируйте копитрейдинг
+        <p
+          style={{
+            color: '#8b949e',
+            fontSize: '14px',
+            lineHeight: 1.5,
+            margin: '0 0 28px',
+          }}
+        >
+          Connect your wallet and activate copy trading
         </p>
 
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
-          <ConnectButton label="Подключить кошелек" showBalance={false} accountStatus="address" />
+        <div style={{ textAlign: 'left', marginBottom: '18px' }}>
+          <label
+            htmlFor="telegram-id"
+            style={{
+              display: 'block',
+              fontSize: '12px',
+              fontWeight: 600,
+              color: '#8b949e',
+              marginBottom: '8px',
+              letterSpacing: '0.02em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Telegram ID
+          </label>
+          <div style={{ position: 'relative' }}>
+            <span
+              aria-hidden
+              style={{
+                position: 'absolute',
+                left: '14px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                display: 'flex',
+                alignItems: 'center',
+                color: '#6e7681',
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+              </svg>
+            </span>
+            <input
+              id="telegram-id"
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="Enter ID from the Telegram bot"
+              value={telegramId}
+              onChange={(e) => setTelegramId(e.target.value.replace(/[^\d]/g, ''))}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                padding: '12px 14px 12px 40px',
+                borderRadius: '10px',
+                border: '1px solid #30363d',
+                background: '#0d1117',
+                color: '#e6edf3',
+                fontSize: '15px',
+                outline: 'none',
+                transition: 'border-color 0.15s, box-shadow 0.15s',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(0, 242, 254, 0.45)';
+                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(0, 242, 254, 0.1)';
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = '#30363d';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            />
+          </div>
+          <p
+            style={{
+              margin: '8px 0 0',
+              fontSize: '12px',
+              color: '#6e7681',
+              lineHeight: 1.4,
+            }}
+          >
+            Open the Telegram bot and copy the ID it shows you.
+          </p>
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            marginBottom: '8px',
+          }}
+        >
+          <ConnectButton
+            label="Connect wallet"
+            showBalance={false}
+            accountStatus="address"
+          />
         </div>
 
         {isConnected && (
@@ -196,22 +388,73 @@ if (!res.ok) throw new Error(data.error || 'Ошибка сохранения');
               onClick={handleApproveAndActivate}
               disabled={loading}
               style={{
-                width: '100%', padding: '14px', borderRadius: '8px', border: 'none',
-                background: loading ? '#30363d' : 'linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)',
-                color: '#000', fontWeight: 'bold', fontSize: '15px',
-                cursor: loading ? 'not-allowed' : 'pointer', transition: '0.2s',
+                width: '100%',
+                padding: '14px 16px',
+                borderRadius: '10px',
+                border: 'none',
+                background: loading
+                  ? '#30363d'
+                  : 'linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)',
+                color: loading ? '#8b949e' : '#0b0e14',
+                fontWeight: 700,
+                fontSize: '15px',
+                letterSpacing: '0.01em',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                transition: 'opacity 0.2s, transform 0.15s',
+                boxShadow: loading
+                  ? 'none'
+                  : '0 4px 20px rgba(0, 242, 254, 0.25)',
+              }}
+              onMouseEnter={(e) => {
+                if (!loading) e.currentTarget.style.opacity = '0.92';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.opacity = '1';
               }}
             >
-              {loading ? 'Обработка...' : 'Активировать Hyper Quant'}
+              {loading ? 'Processing...' : 'Activate Hyper Quant'}
             </button>
 
             {status && (
-              <p style={{ marginTop: '16px', fontSize: '13px', color: status.startsWith('Ошибка') ? '#ff7b72' : '#7ee787' }}>
+              <p
+                style={{
+                  marginTop: '16px',
+                  marginBottom: 0,
+                  fontSize: '13px',
+                  lineHeight: 1.45,
+                  color: status.startsWith('Error') ? '#ff7b72' : '#7ee787',
+                }}
+              >
                 {status}
               </p>
             )}
           </div>
         )}
+
+        <div
+          style={{
+            marginTop: '28px',
+            paddingTop: '20px',
+            borderTop: '1px solid #21262d',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+          }}
+        >
+          <span
+            style={{
+              width: '6px',
+              height: '6px',
+              borderRadius: '50%',
+              background: '#3fb950',
+              boxShadow: '0 0 8px rgba(63, 185, 80, 0.6)',
+            }}
+          />
+          <span style={{ fontSize: '12px', color: '#6e7681' }}>
+            Secured · Non-custodial · Hyperliquid
+          </span>
+        </div>
       </div>
     </main>
   );
