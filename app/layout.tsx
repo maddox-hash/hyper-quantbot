@@ -3,7 +3,7 @@ import { Providers } from './providers';
 
 export const metadata = {
   title: 'Hyper Quant — Web3 Connect',
-  description: 'Connect wallet for Hyper Quant Telegram Bot',
+  description: 'Connect your wallet and activate Hyper Quant copy trading for Hyperliquid',
 };
 
 export default function RootLayout({
@@ -20,7 +20,9 @@ export default function RootLayout({
           backgroundColor: '#0b0e14',
           color: '#ffffff',
           fontFamily:
-            '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif',
+          WebkitFontSmoothing: 'antialiased',
+          MozOsxFontSmoothing: 'grayscale',
         }}
       >
         <Providers>{children}</Providers>
