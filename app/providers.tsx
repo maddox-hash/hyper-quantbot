@@ -8,12 +8,12 @@ import {
 } from '@rainbow-me/rainbowkit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WagmiProvider } from 'wagmi';
-import { arbitrum, mainnet } from 'wagmi/chains';
+import { arbitrum } from 'wagmi/chains';
 
 const config = getDefaultConfig({
   appName: 'Hyper Quant',
   projectId: '043441b4b120f23023e1074e0d49f05a',
-  chains: [arbitrum, mainnet],
+  chains: [arbitrum],
   ssr: true,
 });
 
