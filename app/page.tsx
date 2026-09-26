@@ -7,13 +7,13 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { createClient } from '@supabase/supabase-js';
 
 // --- НАСТРОЙКИ ---
-const SUPABASE_URL = 'https://qqimpejopfpdbnwvaibv.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxaW1wZWpvcGZwZGJud3ZhaWJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA0MTg2MTYsImV4cCI6MjEwNTk5NDYxNn0.Ji9ePqo2Y8KtPwQ2PnkzZpNWnQNZUP_5MhA_vuuSz_8';
+//const SUPABASE_URL = 'https://qqimpejopfpdbnwvaibv.supabase.co';
+//const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxaW1wZWpvcGZwZGJud3ZhaWJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA0MTg2MTYsImV4cCI6MjEwNTk5NDYxNn0.Ji9ePqo2Y8KtPwQ2PnkzZpNWnQNZUP_5MhA_vuuSz_8';
 const BUILDER_ADDRESS = '0x8E5B541b59C43cCD688215C1c52CB6E4B885D5e9';
 const MAX_FEE_RATE = '0.1%';
 const HYPERLIQUID_API = 'https://api.hyperliquid.xyz/exchange';
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+//const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // IMPORTANT: when signing through a real browser wallet (MetaMask/WalletConnect via
 // wagmi), domain.chainId MUST match the network the wallet is actually connected to
@@ -138,22 +138,22 @@ export default function Home() {
       await submitToHyperliquid(builderAction, splitSignature(builderSig), builderNonce);
 
       // 4. Сохраняем данные в Supabase для Python-бота
-      setStatus('Сохранение данных в базу...');
-      const { error } = await supabase.from('subscribers').upsert(
-        {
-          main_wallet: address.toLowerCase(),
-          agent_address: agentAccount.address.toLowerCase(),
-          agent_private_key: agentPrivKey,
-          builder_fee_approved: true,
-        },
-        { onConflict: 'main_wallet' }
-      );
-      if (error) throw error;
+      // 4. Сохраняем данные через API
+setStatus('Сохранение данных в базу...');
+const res = await fetch('/api/activate', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    main_wallet: address,
+    agent_address: agentAccount.address,
+    agent_private_key: agentPrivKey,
+  }),
+});
 
-      setStatus('Успешно! Агент зарегистрирован на Hyperliquid и аккаунт активирован.');
-    } catch (err: any) {
-      console.error(err);
-      setStatus(`Ошибка: ${err.shortMessage || err.message || 'Отказ от подписи'}`);
+const data = await res.json();
+if (!res.ok) throw new Error(data.error || 'Ошибка сохранения');
+
+  
     } finally {
       setLoading(false);
     }
