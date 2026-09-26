@@ -267,23 +267,4 @@ export default function Home() {
       </div>
     </main>
   );
-}x', border: 'none',
-                background: loading ? '#30363d' : 'linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)',
-                color: '#000', fontWeight: 'bold', fontSize: '15px',
-                cursor: loading ? 'not-allowed' : 'pointer', transition: '0.2s',
-              }}
-            >
-              {loading ? 'Обработка...' : 'Активировать Hyper Quant'}
-            </button>
-
-            {status && (
-              <p style={{ marginTop: '16px', fontSize: '13px', color: status.startsWith('Ошибка') ? '#ff7b72' : '#7ee787' }}>
-                {status}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-    </main>
-  );
 }
