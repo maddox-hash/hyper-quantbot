@@ -1,162 +1,6 @@
 'use client';
 
-import { useState } from 'react';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useSignTypedData } from 'wagmi';
-import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-
-// --- SETTINGS ---
-const BUILDER_ADDRESS = '0x8E5B541b59C43cCD688215C1c52CB6E4B885D5e9';
-const MAX_FEE_RATE = '0.03%';
-const HYPERLIQUID_API = 'https://api.hyperliquid.xyz/exchange';
-// Change this to your bot username if different
-const TELEGRAM_BOT_URL = 'https://t.me/hyperquantbot';
-
-// IMPORTANT: when signing through a real browser wallet (MetaMask/WalletConnect via
-// wagmi), domain.chainId MUST match the network the wallet is actually connected to
-// (Arbitrum One = 42161), otherwise the wallet itself rejects the request with
-// "Invalid parameters were provided to the RPC method" before it ever reaches Hyperliquid.
-const domain = {
-  name: 'HyperliquidSignTransaction',
-  version: '1',
-  chainId: 42161,
-  verifyingContract: '0x0000000000000000000000000000000000000000',
-} as const;
-
-const agentTypes = {
-  'HyperliquidTransaction:ApproveAgent': [
-    { name: 'hyperliquidChain', type: 'string' },
-    { name: 'agentAddress', type: 'address' },
-    { name: 'agentName', type: 'string' },
-    { name: 'nonce', type: 'uint64' },
-  ],
-} as const;
-
-const builderFeeTypes = {
-  'HyperliquidTransaction:ApproveBuilderFee': [
-    { name: 'hyperliquidChain', type: 'string' },
-    { name: 'maxFeeRate', type: 'string' },
-    { name: 'builder', type: 'address' },
-    { name: 'nonce', type: 'uint64' },
-  ],
-} as const;
-
-function splitSignature(signature: `0x${string}`) {
-  return {
-    r: signature.slice(0, 66) as `0x${string}`,
-    s: (`0x${signature.slice(66, 130)}`) as `0x${string}`,
-    v: parseInt(signature.slice(130, 132), 16),
-  };
-}
-
-async function submitToHyperliquid(
-  action: Record<string, unknown>,
-  signature: { r: string; s: string; v: number },
-  nonce: number
-) {
-  const res = await fetch(HYPERLIQUID_API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, nonce, signature }),
-  });
-  const data = await res.json();
-  if (data.status !== 'ok') {
-    throw new Error(
-      data.response ? JSON.stringify(data.response) : 'Hyperliquid API rejected the action'
-    );
-  }
-  return data;
-}
-
 export default function Home() {
-  const { address, isConnected } = useAccount();
-  const { signTypedDataAsync } = useSignTypedData();
-
-  const [telegramId, setTelegramId] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-
-  const handleApproveAndActivate = async () => {
-    if (!address) return;
-    setLoading(true);
-    setStatus('Generating trading agent...');
-
-    try {
-      const agentPrivKey = generatePrivateKey();
-      const agentAccount = privateKeyToAccount(agentPrivKey);
-
-      const agentNonce = Date.now();
-      const builderNonce = agentNonce + 1;
-
-      setStatus('Sign agent approval in your wallet (1/2)...');
-      const agentAction = {
-        type: 'approveAgent',
-        hyperliquidChain: 'Mainnet',
-        signatureChainId: '0xa4b1',
-        agentAddress: agentAccount.address,
-        agentName: 'HyperQuant',
-        nonce: agentNonce,
-      };
-      const agentSig = await signTypedDataAsync({
-        domain,
-        types: agentTypes,
-        primaryType: 'HyperliquidTransaction:ApproveAgent',
-        message: {
-          hyperliquidChain: 'Mainnet',
-          agentAddress: agentAccount.address as `0x${string}`,
-          agentName: 'HyperQuant',
-          nonce: BigInt(agentNonce),
-        },
-      });
-      setStatus('Registering agent on Hyperliquid...');
-      await submitToHyperliquid(agentAction, splitSignature(agentSig), agentNonce);
-
-      setStatus('Sign builder fee approval in your wallet (2/2)...');
-      const builderAction = {
-        type: 'approveBuilderFee',
-        hyperliquidChain: 'Mainnet',
-        signatureChainId: '0xa4b1',
-        maxFeeRate: MAX_FEE_RATE,
-        builder: BUILDER_ADDRESS,
-        nonce: builderNonce,
-      };
-      const builderSig = await signTypedDataAsync({
-        domain,
-        types: builderFeeTypes,
-        primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
-        message: {
-          hyperliquidChain: 'Mainnet',
-          maxFeeRate: MAX_FEE_RATE,
-          builder: BUILDER_ADDRESS as `0x${string}`,
-          nonce: BigInt(builderNonce),
-        },
-      });
-      setStatus('Registering builder fee...');
-      await submitToHyperliquid(builderAction, splitSignature(builderSig), builderNonce);
-
-      setStatus('Saving data...');
-      const res = await fetch('/api/activate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          main_wallet: address,
-          agent_address: agentAccount.address,
-          agent_private_key: agentPrivKey,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to save data');
-
-      setStatus('Activated successfully. You can return to Telegram.');
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : 'Something went wrong';
-      setStatus(`Error: ${message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <main
       style={{
@@ -189,7 +33,7 @@ export default function Home() {
           border: '1px solid rgba(48, 54, 61, 0.9)',
           borderRadius: '20px',
           padding: '40px 28px 36px',
-          maxWidth: '560px',
+          maxWidth: '620px',
           width: '100%',
           textAlign: 'center',
           boxShadow:
@@ -211,6 +55,7 @@ export default function Home() {
           }}
         />
 
+        {/* Logo */}
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
           <div
             style={{
@@ -236,6 +81,7 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Title */}
         <h1
           style={{
             fontSize: '26px',
@@ -250,15 +96,19 @@ export default function Home() {
         >
           HYPER QUANT
         </h1>
+
+        {/* Subtitle - Create Bot */}
         <p
           style={{
-            color: '#8b949e',
-            fontSize: '14px',
-            lineHeight: 1.5,
-            margin: '0 0 24px',
+            color: '#e6edf3',
+            fontSize: '18px',
+            fontWeight: 600,
+            lineHeight: 1.4,
+            margin: '0 0 28px',
+            letterSpacing: '-0.01em',
           }}
         >
-          Algorithmic Trading System
+          Create Bot
         </p>
 
         {/* ===== BOT TYPES SECTION ===== */}
@@ -267,7 +117,7 @@ export default function Home() {
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
             gap: '14px',
-            marginBottom: '28px',
+            marginBottom: '8px',
             width: '100%',
           }}
         >
@@ -280,6 +130,7 @@ export default function Home() {
               padding: '18px 14px 16px',
               textAlign: 'center',
               transition: 'border-color 0.2s, box-shadow 0.2s',
+              cursor: 'pointer',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
@@ -325,9 +176,9 @@ export default function Home() {
                 textAlign: 'left',
               }}
             >
-              <li style={{ marginBottom: 4 }}>• Извлекайте прибыль из волатильности</li>
-              <li style={{ marginBottom: 4 }}>• Маркетмейкинг</li>
-              <li>• Трейлинг для каждой сетки — не упустите сильное движение</li>
+              <li style={{ marginBottom: 4 }}>• Extract profit from volatility</li>
+              <li style={{ marginBottom: 4 }}>• Market making</li>
+              <li>• Trailing for every grid — never miss a strong move</li>
             </ul>
           </div>
 
@@ -340,6 +191,7 @@ export default function Home() {
               padding: '18px 14px 16px',
               textAlign: 'center',
               transition: 'border-color 0.2s, box-shadow 0.2s',
+              cursor: 'pointer',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
@@ -387,10 +239,10 @@ export default function Home() {
                 textAlign: 'left',
               }}
             >
-              <li style={{ marginBottom: 4 }}>• Используйте усреднение</li>
-              <li style={{ marginBottom: 4 }}>• Забирайте прибыль на любом рынке</li>
-              <li style={{ marginBottom: 4 }}>• Накапливайте активы</li>
-              <li>• Тех. индикаторы + Order Flow фильтры</li>
+              <li style={{ marginBottom: 4 }}>• Use averaging</li>
+              <li style={{ marginBottom: 4 }}>• Take profit on any market</li>
+              <li style={{ marginBottom: 4 }}>• Accumulate assets</li>
+              <li>• Technical indicators + Order Flow filters</li>
             </ul>
           </div>
 
@@ -403,6 +255,7 @@ export default function Home() {
               padding: '18px 14px 16px',
               textAlign: 'center',
               transition: 'border-color 0.2s, box-shadow 0.2s',
+              cursor: 'pointer',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
@@ -447,9 +300,9 @@ export default function Home() {
                 textAlign: 'left',
               }}
             >
-              <li style={{ marginBottom: 4 }}>• Совмещённая стратегия</li>
-              <li style={{ marginBottom: 4 }}>• Стабильность Grid bot</li>
-              <li>• Надёжность и прибыль DCA</li>
+              <li style={{ marginBottom: 4 }}>• Combined strategy</li>
+              <li style={{ marginBottom: 4 }}>• Stability of Grid bot</li>
+              <li>• Reliability & profit of DCA</li>
             </ul>
           </div>
 
@@ -462,6 +315,7 @@ export default function Home() {
               padding: '18px 14px 16px',
               textAlign: 'center',
               transition: 'border-color 0.2s, box-shadow 0.2s',
+              cursor: 'pointer',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
@@ -508,198 +362,86 @@ export default function Home() {
                 textAlign: 'left',
               }}
             >
-              <li style={{ marginBottom: 3 }}>• 3 встроенных торговых системы</li>
-              <li style={{ marginBottom: 3 }}>• Технический анализ рынка</li>
-              <li style={{ marginBottom: 3 }}>• Анализ лимитных ордеров</li>
+              <li style={{ marginBottom: 3 }}>• 3 built-in trading systems</li>
+              <li style={{ marginBottom: 3 }}>• Technical market analysis</li>
+              <li style={{ marginBottom: 3 }}>• Limit order analysis</li>
               <li style={{ marginBottom: 3 }}>• Order Flow</li>
-              <li style={{ marginBottom: 3 }}>• Анализ волатильности</li>
-              <li>• Защита от памп/дамп</li>
+              <li style={{ marginBottom: 3 }}>• Volatility analysis</li>
+              <li>• Pump / dump protection</li>
             </ul>
+          </div>
+
+          {/* CUSTOM BOT - DISABLED */}
+          <div
+            style={{
+              background: 'rgba(13, 17, 23, 0.45)',
+              border: '1px solid rgba(48, 54, 61, 0.6)',
+              borderRadius: '14px',
+              padding: '18px 14px 16px',
+              textAlign: 'center',
+              opacity: 0.72,
+              cursor: 'not-allowed',
+              position: 'relative',
+              gridColumn: '1 / -1', // full width on small screens, or spans
+            }}
+          >
+            <div
+              style={{
+                width: 56,
+                height: 56,
+                margin: '0 auto 12px',
+                borderRadius: 14,
+                background: 'rgba(110, 118, 129, 0.12)',
+                border: '1px solid rgba(110, 118, 129, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {/* Gears + Wrench icon */}
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"
+                  stroke="#6e7681"
+                  strokeWidth="1.6"
+                />
+                <path
+                  d="M19.4 13.2a7.2 7.2 0 0 0 .1-1.2 7.2 7.2 0 0 0-.1-1.2l1.7-1.3a.4.4 0 0 0 .1-.5l-1.6-2.8a.4.4 0 0 0-.5-.2l-2 0.8a6.5 6.5 0 0 0-2.1-1.2l-.3-2.1a.4.4 0 0 0-.4-.3h-3.2a.4.4 0 0 0-.4.3l-.3 2.1a6.5 6.5 0 0 0-2.1 1.2l-2-.8a.4.4 0 0 0-.5.2L2.8 9a.4.4 0 0 0 .1.5l1.7 1.3a7.2 7.2 0 0 0-.1 1.2 7.2 7.2 0 0 0 .1 1.2L2.9 14.5a.4.4 0 0 0-.1.5l1.6 2.8a.4.4 0 0 0 .5.2l2-.8a6.5 6.5 0 0 0 2.1 1.2l.3 2.1a.4.4 0 0 0 .4.3h3.2a.4.4 0 0 0 .4-.3l.3-2.1a6.5 6.5 0 0 0 2.1-1.2l2 .8a.4.4 0 0 0 .5-.2l1.6-2.8a.4.4 0 0 0-.1-.5l-1.7-1.3z"
+                  stroke="#6e7681"
+                  strokeWidth="1.3"
+                  opacity="0.85"
+                />
+                {/* Small wrench accent */}
+                <path
+                  d="M16.5 7.5l1.8-1.8a1.2 1.2 0 0 1 1.7 1.7L18.2 9.2"
+                  stroke="#6e7681"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
+            <div style={{ fontWeight: 700, fontSize: '15px', color: '#8b949e', marginBottom: '8px' }}>
+              Custom Bot
+            </div>
+            <div
+              style={{
+                fontSize: '12px',
+                fontWeight: 600,
+                color: '#e3b341',
+                letterSpacing: '0.03em',
+                textTransform: 'uppercase',
+              }}
+            >
+              In Development
+            </div>
           </div>
         </div>
         {/* ===== END BOT TYPES ===== */}
 
-        <div style={{ textAlign: 'left', marginBottom: '18px' }}>
-          <label
-            htmlFor="telegram-id"
-            style={{
-              display: 'block',
-              fontSize: '12px',
-              fontWeight: 600,
-              color: '#8b949e',
-              marginBottom: '8px',
-              letterSpacing: '0.02em',
-              textTransform: 'uppercase',
-            }}
-          >
-            Telegram ID
-          </label>
-          <div style={{ position: 'relative' }}>
-            <span
-              aria-hidden
-              style={{
-                position: 'absolute',
-                left: '14px',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                display: 'flex',
-                alignItems: 'center',
-                color: '#6e7681',
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
-              </svg>
-            </span>
-            <input
-              id="telegram-id"
-              type="text"
-              inputMode="numeric"
-              autoComplete="off"
-              placeholder="Enter ID from the Telegram bot"
-              value={telegramId}
-              onChange={(e) => setTelegramId(e.target.value.replace(/[^\d]/g, ''))}
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                padding: '12px 14px 12px 40px',
-                borderRadius: '10px',
-                border: '1px solid #30363d',
-                background: '#0d1117',
-                color: '#e6edf3',
-                fontSize: '15px',
-                outline: 'none',
-                transition: 'border-color 0.15s, box-shadow 0.15s',
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
-                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(46, 230, 197, 0.1)';
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = '#30363d';
-                e.currentTarget.style.boxShadow = 'none';
-              }}
-            />
-          </div>
-          <p
-            style={{
-              margin: '8px 0 0',
-              fontSize: '12px',
-              color: '#8b949e',
-              lineHeight: 1.5,
-            }}
-          >
-            <span style={{ color: '#e3b341', fontWeight: 600 }}>Note:</span>{' '}
-            Enter your Telegram ID if you have an active paid subscription.
-            Leave this field empty on the free plan — a builder fee of{' '}
-            <span style={{ color: '#2ee6c5' }}>0.01%</span> will apply
-            (up to <span style={{ color: '#2ee6c5' }}>0.03%</span> for our MVP Quant Bot).
-          </p>
-        </div>
-
+        {/* Footer */}
         <div
           style={{
-            display: 'flex',
-            justifyContent: 'center',
-            marginBottom: '8px',
-          }}
-        >
-          <ConnectButton
-            label="Connect wallet"
-            showBalance={false}
-            accountStatus="address"
-          />
-        </div>
-
-        {isConnected && (
-          <div style={{ marginTop: '20px' }}>
-            <button
-              onClick={handleApproveAndActivate}
-              disabled={loading}
-              style={{
-                width: '100%',
-                padding: '14px 16px',
-                borderRadius: '10px',
-                border: 'none',
-                background: loading
-                  ? '#30363d'
-                  : 'linear-gradient(90deg, #2ee6c5 0%, #5ef0d4 100%)',
-                color: loading ? '#8b949e' : '#0b0e14',
-                fontWeight: 700,
-                fontSize: '15px',
-                letterSpacing: '0.01em',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                transition: 'opacity 0.2s, transform 0.15s',
-                boxShadow: loading
-                  ? 'none'
-                  : '0 4px 20px rgba(46, 230, 197, 0.25)',
-              }}
-              onMouseEnter={(e) => {
-                if (!loading) e.currentTarget.style.opacity = '0.92';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.opacity = '1';
-              }}
-            >
-              {loading ? 'Processing...' : 'Activate Hyper Quant'}
-            </button>
-
-            {status && (
-              <p
-                style={{
-                  marginTop: '16px',
-                  marginBottom: 0,
-                  fontSize: '13px',
-                  lineHeight: 1.45,
-                  color: status.startsWith('Error') ? '#ff7b72' : '#7ee787',
-                }}
-              >
-                {status}
-              </p>
-            )}
-          </div>
-        )}
-
-        <a
-          href={TELEGRAM_BOT_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '10px',
-            marginTop: '22px',
-            width: '100%',
-            boxSizing: 'border-box',
-            padding: '12px 16px',
-            borderRadius: '10px',
-            border: '1px solid rgba(46, 230, 197, 0.35)',
-            background: 'rgba(46, 230, 197, 0.06)',
-            color: '#2ee6c5',
-            fontWeight: 600,
-            fontSize: '14px',
-            textDecoration: 'none',
-            transition: 'background 0.15s, border-color 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(46, 230, 197, 0.12)';
-            e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.55)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(46, 230, 197, 0.06)';
-            e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.35)';
-          }}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
-          </svg>
-          Open Telegram Bot
-        </a>
-
-        <div
-          style={{
-            marginTop: '20px',
+            marginTop: '24px',
             paddingTop: '18px',
             borderTop: '1px solid #21262d',
             display: 'flex',
