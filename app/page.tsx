@@ -5,7 +5,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useSignTypedData } from 'wagmi';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 
-// --- SETTINGS ---
+// --- SETTINGS --- final
 const BUILDER_ADDRESS = '0x8E5B541b59C43cCD688215C1c52CB6E4B885D5e9';
 const MAX_FEE_RATE = '0.03%';
 const HYPERLIQUID_API = 'https://api.hyperliquid.xyz/exchange';
