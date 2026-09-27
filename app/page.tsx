@@ -10,7 +10,7 @@ const BUILDER_ADDRESS = '0x8E5B541b59C43cCD688215C1c52CB6E4B885D5e9';
 const MAX_FEE_RATE = '0.03%';
 const HYPERLIQUID_API = 'https://api.hyperliquid.xyz/exchange';
 // Change this to your bot username if different
-const TELEGRAM_BOT_URL = 'https://t.me/hyperquantbot';
+const TELEGRAM_BOT_URL = 'https://t.me/hyperquant_trade_bot';
 
 // IMPORTANT: when signing through a real browser wallet (MetaMask/WalletConnect via
 // wagmi), domain.chainId MUST match the network the wallet is actually connected to
@@ -475,4 +475,5 @@ export default function Home() {
       </div>
     </main>
   );
+}
 }
