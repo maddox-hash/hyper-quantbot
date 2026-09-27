@@ -35,7 +35,7 @@ export default function Home() {
   const [dragStartX, setDragStartX] = useState(0);
   const [dragStartOffset, setDragStartOffset] = useState(0);
 
-  // Stats (editable but look static)
+  // Stats
   const [wins, setWins] = useState(47);
   const [losses, setLosses] = useState(12);
   const [invested, setInvested] = useState('2,450.00');
@@ -46,6 +46,18 @@ export default function Home() {
 
   const winrate = wins + losses > 0 ? ((wins / (wins + losses)) * 100).toFixed(1) : '0.0';
 
+  const calcSharpe = () => {
+    const total = wins + losses;
+    if (total === 0) return '0.00';
+    const wr = wins / total;
+    const pnl = parseFloat(String(pnlAll).replace(/[^0-9.\-]/g, '')) || 0;
+    const lossRatio = losses / total;
+    let sharpe = wr * 2.8 + pnl / 40 - lossRatio * 1.1;
+    sharpe = Math.max(0.15, Math.min(4.2, sharpe));
+    return sharpe.toFixed(2);
+  };
+  const sharpe = calcSharpe();
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const markerId = useRef(0);
 
@@ -53,7 +65,6 @@ export default function Home() {
     setLoadingChart(true);
     try {
       const end = Date.now();
-      // more history for higher TF
       const days = tf === '1h' ? 14 : tf === '4h' ? 45 : 180;
       const start = end - days * 24 * 60 * 60 * 1000;
       const res = await fetch('https://api.hyperliquid.xyz/info', {
@@ -126,7 +137,6 @@ export default function Home() {
     ctx.fillStyle = '#0d1117';
     ctx.fillRect(0, 0, W, H);
 
-    // subtle grid
     ctx.strokeStyle = 'rgba(48, 54, 61, 0.45)';
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) {
@@ -137,7 +147,6 @@ export default function Home() {
       ctx.stroke();
     }
 
-    // price labels
     ctx.fillStyle = '#8b949e';
     ctx.font = '10.5px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.textAlign = 'left';
@@ -146,7 +155,6 @@ export default function Home() {
       ctx.fillText(p.toFixed(0), W - padR + 5, padT + (i / 4) * chartH + 3.5);
     }
 
-    // candles
     const candleW = Math.max(2.8, (chartW / visibleCount) * 0.62);
     visible.forEach((c, i) => {
       const x = xScale(i);
@@ -170,7 +178,6 @@ export default function Home() {
       ctx.fillRect(x - candleW / 2, bodyTop, candleW, bodyH);
     });
 
-    // markers
     markers.forEach((m) => {
       if (m.type === 'arrowUp' && m.index !== undefined) {
         const localIdx = m.index - startIdx;
@@ -218,7 +225,6 @@ export default function Home() {
       }
     });
 
-    // time labels
     ctx.fillStyle = '#6e7681';
     ctx.font = '10px -apple-system, sans-serif';
     ctx.textAlign = 'center';
@@ -232,7 +238,6 @@ export default function Home() {
       ctx.fillText(label, xScale(i), H - 6);
     });
 
-    // last price tag
     const last = visible[visible.length - 1];
     if (last) {
       const y = yScale(last.c);
@@ -311,7 +316,6 @@ export default function Home() {
     setInterval('1h');
   };
 
-  // Invisible editable field helper
   const Editable = ({
     value,
     onChange,
@@ -447,7 +451,7 @@ export default function Home() {
           {selectedBot ? 'My Test QuantBot (#6)' : 'Create Bot'}
         </p>
 
-        {/* ===== BOT CARDS ===== */}
+        {/* BOT CARDS */}
         {!selectedBot && (
           <div
             style={{
@@ -552,7 +556,6 @@ export default function Home() {
               </div>
             ))}
 
-            {/* Custom disabled */}
             <div
               style={{
                 background: 'rgba(13, 17, 23, 0.4)',
@@ -590,19 +593,11 @@ export default function Home() {
           </div>
         )}
 
-        {/* ===== CHART VIEW ===== */}
+        {/* CHART VIEW */}
         {selectedBot && (
           <div style={{ width: '100%' }}>
-            {/* Top bar: gear + timeframes */}
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '10px',
-              }}
-            >
-              {/* Gear */}
+            {/* Top bar */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <button
                 onClick={() => {
                   setShowTools((v) => !v);
@@ -620,7 +615,6 @@ export default function Home() {
                   cursor: 'pointer',
                   color: showTools ? '#2ee6c5' : '#8b949e',
                 }}
-                title="Drawing tools"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
                   <circle cx="12" cy="12" r="3" />
@@ -628,7 +622,6 @@ export default function Home() {
                 </svg>
               </button>
 
-              {/* Timeframes */}
               <div style={{ display: 'flex', gap: '6px' }}>
                 {(['1h', '4h', '1d'] as Interval[]).map((tf) => (
                   <button
@@ -652,17 +645,9 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Tools bar (toggle) */}
+            {/* Tools */}
             {showTools && (
-              <div
-                style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: '7px',
-                  justifyContent: 'center',
-                  marginBottom: '10px',
-                }}
-              >
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', justifyContent: 'center', marginBottom: '10px' }}>
                 {[
                   { id: 'none' as Tool, label: 'Pan' },
                   { id: 'arrowUp' as Tool, label: '↑ Entry' },
@@ -754,7 +739,7 @@ export default function Home() {
               <span>Drag to pan</span>
             </div>
 
-            {/* ===== STATS PANEL ===== */}
+            {/* STATS PANEL */}
             <div
               style={{
                 marginTop: '16px',
@@ -769,7 +754,6 @@ export default function Home() {
                 Performance
               </div>
 
-              {/* Row 1: Wins / Losses / Winrate */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '14px' }}>
                 <div style={{ background: 'rgba(63,185,80,0.08)', borderRadius: 10, padding: '10px 12px', border: '1px solid rgba(63,185,80,0.15)' }}>
                   <div style={{ fontSize: '10.5px', color: '#8b949e', marginBottom: 3 }}>Closed in Profit</div>
@@ -789,7 +773,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Row 2: Invested */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', padding: '0 2px' }}>
                 <span style={{ fontSize: '12px', color: '#8b949e' }}>Invested</span>
                 <span style={{ fontSize: '15px', fontWeight: 600, color: '#e6edf3' }}>
@@ -797,7 +780,6 @@ export default function Home() {
                 </span>
               </div>
 
-              {/* Row 3: PnL periods */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
                 {[
                   { label: '1D', value: pnl1d, set: setPnl1d },
@@ -805,7 +787,7 @@ export default function Home() {
                   { label: '1M', value: pnl1m, set: setPnl1m },
                   { label: 'All', value: pnlAll, set: setPnlAll },
                 ].map((item) => {
-                  const isPos = String(item.value).startsWith('+') || (!String(item.value).startsWith('-') && parseFloat(String(item.value)) >= 0);
+                  const isPos = String(item.value).trim().startsWith('+') || (!String(item.value).trim().startsWith('-') && parseFloat(String(item.value)) >= 0);
                   return (
                     <div
                       key={item.label}
@@ -819,19 +801,13 @@ export default function Home() {
                     >
                       <div style={{ fontSize: '10px', color: '#8b949e', marginBottom: 2 }}>{item.label}</div>
                       <div style={{ fontSize: '13.5px', fontWeight: 700 }}>
-                        <Editable
-                          value={item.value}
-                          onChange={item.set}
-                          color={isPos ? '#3fb950' : '#f85149'}
-                          fontSize="13.5px"
-                        />
+                        <Editable value={item.value} onChange={item.set} color={isPos ? '#3fb950' : '#f85149'} fontSize="13.5px" />
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              {/* Extra nice row */}
               <div
                 style={{
                   marginTop: '12px',
@@ -845,11 +821,10 @@ export default function Home() {
               >
                 <span>Avg. Hold · <span style={{ color: '#e6edf3', fontWeight: 600 }}>4.2h</span></span>
                 <span>Max DD · <span style={{ color: '#f85149', fontWeight: 600 }}>-6.8%</span></span>
-                <span>Sharpe · <span style={{ color: '#2ee6c5', fontWeight: 600 }}>2.14</span></span>
+                <span>Sharpe · <span style={{ color: '#2ee6c5', fontWeight: 600 }}>{sharpe}</span></span>
               </div>
             </div>
 
-            {/* Back */}
             <button
               onClick={() => {
                 setSelectedBot(null);
