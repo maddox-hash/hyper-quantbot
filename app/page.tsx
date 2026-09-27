@@ -10,7 +10,6 @@ type TradeMode = 'positional' | 'normal' | 'aggressive';
 export default function Home() {
   const [selectedBot, setSelectedBot] = useState<BotType>(null);
 
-  // Form state
   const [investAmount, setInvestAmount] = useState('500');
   const [direction, setDirection] = useState<Direction>('LONG');
   const [leverage, setLeverage] = useState(2);
@@ -71,7 +70,6 @@ export default function Home() {
   const handleBotClick = (bot: BotType) => {
     if (!bot) return;
     setSelectedBot(bot);
-    // reset form defaults
     setInvestAmount('500');
     setDirection('LONG');
     setLeverage(2);
@@ -111,6 +109,75 @@ export default function Home() {
     >
       {label}
     </button>
+  );
+
+  const HelpTip = ({ text }: { text: string }) => (
+    <span
+      style={{
+        position: 'relative',
+        display: 'inline-flex',
+        alignItems: 'center',
+        marginLeft: 5,
+        cursor: 'help',
+      }}
+      onMouseEnter={(e) => {
+        const tip = e.currentTarget.querySelector('.hq-tip') as HTMLElement;
+        if (tip) tip.style.opacity = '1';
+        if (tip) tip.style.visibility = 'visible';
+      }}
+      onMouseLeave={(e) => {
+        const tip = e.currentTarget.querySelector('.hq-tip') as HTMLElement;
+        if (tip) tip.style.opacity = '0';
+        if (tip) tip.style.visibility = 'hidden';
+      }}
+    >
+      <span
+        style={{
+          width: 14,
+          height: 14,
+          borderRadius: '50%',
+          border: '1px solid #6e7681',
+          color: '#6e7681',
+          fontSize: 10,
+          fontWeight: 700,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          lineHeight: 1,
+        }}
+      >
+        ?
+      </span>
+      <span
+        className="hq-tip"
+        style={{
+          position: 'absolute',
+          left: '50%',
+          bottom: 'calc(100% + 8px)',
+          transform: 'translateX(-50%)',
+          width: 220,
+          padding: '10px 12px',
+          borderRadius: 10,
+          background: '#161b22',
+          border: '1px solid #30363d',
+          color: '#c9d1d9',
+          fontSize: 12,
+          fontWeight: 400,
+          lineHeight: 1.45,
+          textTransform: 'none',
+          letterSpacing: 'normal',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+          opacity: 0,
+          visibility: 'hidden',
+          transition: 'opacity 0.15s, visibility 0.15s',
+          zIndex: 50,
+          pointerEvents: 'none',
+          textAlign: 'left',
+        }}
+      >
+        {text}
+      </span>
+    </span>
   );
 
   return (
@@ -168,7 +235,6 @@ export default function Home() {
           }}
         />
 
-        {/* Logo only on select screen */}
         {!selectedBot && (
           <>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '14px' }}>
@@ -219,7 +285,6 @@ export default function Home() {
           </>
         )}
 
-        {/* ===== BOT SELECTION ===== */}
         {!selectedBot && (
           <div
             style={{
@@ -334,10 +399,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* ===== CREATE BOT FORM ===== */}
         {selectedBot && (
           <div style={{ width: '100%', textAlign: 'left' }}>
-            {/* Header with icon + type */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '22px' }}>
               <div
                 style={{
@@ -436,7 +499,6 @@ export default function Home() {
                     fontWeight: 700,
                     fontSize: 14,
                     cursor: 'not-allowed',
-                    position: 'relative',
                   }}
                 >
                   SHORT
@@ -445,33 +507,35 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Leverage + Margin */}
+            {/* Leverage slider */}
             <div style={{ marginBottom: '18px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
-                Leverage · max 3×
+              <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '10px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+                <span>Leverage · max 3×</span>
+                <span style={{ color: '#2ee6c5', fontSize: 15, fontWeight: 700 }}>{leverage}×</span>
               </label>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                {[1, 2, 3].map((x) => (
-                  <button
-                    key={x}
-                    onClick={() => setLeverage(x)}
-                    style={{
-                      flex: 1,
-                      padding: '10px',
-                      borderRadius: 10,
-                      border: leverage === x ? '1px solid rgba(46,230,197,0.5)' : '1px solid #30363d',
-                      background: leverage === x ? 'rgba(46,230,197,0.12)' : 'rgba(13,17,23,0.6)',
-                      color: leverage === x ? '#2ee6c5' : '#8b949e',
-                      fontWeight: 700,
-                      fontSize: 14,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {x}×
-                  </button>
-                ))}
+              <input
+                type="range"
+                min={1}
+                max={3}
+                step={1}
+                value={leverage}
+                onChange={(e) => setLeverage(Number(e.target.value))}
+                style={{
+                  width: '100%',
+                  height: 6,
+                  borderRadius: 4,
+                  appearance: 'none',
+                  background: `linear-gradient(to right, #2ee6c5 0%, #2ee6c5 ${((leverage - 1) / 2) * 100}%, #30363d ${((leverage - 1) / 2) * 100}%, #30363d 100%)`,
+                  outline: 'none',
+                  cursor: 'pointer',
+                }}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11, color: '#6e7681' }}>
+                <span>1×</span>
+                <span>2×</span>
+                <span>3×</span>
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                 <button
                   onClick={() => setMarginMode('cross')}
                   style={{
@@ -509,8 +573,9 @@ export default function Home() {
 
             {/* Mode */}
             <div style={{ marginBottom: '18px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+              <label style={{ display: 'flex', alignItems: 'center', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
                 Mode
+                <HelpTip text="Affects risk level, averaging, stop-losses and sensitivity to entry filters." />
               </label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {(
@@ -589,10 +654,11 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Filters / Modules */}
+            {/* Modules */}
             <div style={{ marginBottom: '22px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+              <label style={{ display: 'flex', alignItems: 'center', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
                 Modules
+                <HelpTip text="Filtering and decision-making systems with different trading approaches. Recommended to enable all of them." />
               </label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -603,7 +669,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Create button */}
             <button
               style={{
                 width: '100%',
@@ -641,7 +706,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Footer */}
         <div
           style={{
             marginTop: '20px',
@@ -657,6 +721,26 @@ export default function Home() {
             @keyframes hqPulse {
               0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(63, 185, 80, 0.7); transform: scale(1); }
               50% { opacity: 0.35; box-shadow: 0 0 2px rgba(63, 185, 80, 0.25); transform: scale(0.85); }
+            }
+            input[type=range]::-webkit-slider-thumb {
+              -webkit-appearance: none;
+              appearance: none;
+              width: 18px;
+              height: 18px;
+              border-radius: 50%;
+              background: #2ee6c5;
+              cursor: pointer;
+              border: 2px solid #0b0e14;
+              box-shadow: 0 0 8px rgba(46, 230, 197, 0.45);
+            }
+            input[type=range]::-moz-range-thumb {
+              width: 18px;
+              height: 18px;
+              border-radius: 50%;
+              background: #2ee6c5;
+              cursor: pointer;
+              border: 2px solid #0b0e14;
+              box-shadow: 0 0 8px rgba(46, 230, 197, 0.45);
             }
           `}</style>
           <span
