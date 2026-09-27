@@ -1,14 +1,26 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 type BotType = 'Grid' | 'DCA' | 'Combo' | 'Quant' | null;
 type Direction = 'LONG' | 'SHORT';
 type MarginMode = 'cross' | 'isolated';
 type TradeMode = 'positional' | 'normal' | 'aggressive';
 
+const PAIRS = [
+  { id: 'ETH', label: 'ETH / USDC', base: 'ETH', quote: 'USDC' },
+  { id: 'BTC', label: 'BTC / USDC', base: 'BTC', quote: 'USDC' },
+  { id: 'SOL', label: 'SOL / USDC', base: 'SOL', quote: 'USDC' },
+] as const;
+
+type PairId = (typeof PAIRS)[number]['id'];
+
 export default function Home() {
   const [selectedBot, setSelectedBot] = useState<BotType>(null);
+
+  const [pair, setPair] = useState<PairId>('ETH');
+  const [pairOpen, setPairOpen] = useState(false);
+  const [livePrice, setLivePrice] = useState<string | null>(null);
 
   const [investAmount, setInvestAmount] = useState('500');
   const [direction, setDirection] = useState<Direction>('LONG');
@@ -22,6 +34,48 @@ export default function Home() {
   const [volumesEnabled, setVolumesEnabled] = useState(false);
 
   const balance = '26,525.02';
+
+  // Live mid price from Hyperliquid
+  useEffect(() => {
+    if (!selectedBot) return;
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const res = await fetch('https://api.hyperliquid.xyz/info', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'allMids' }),
+        });
+        const data = await res.json();
+        if (!cancelled && data && data[pair]) {
+          const p = parseFloat(data[pair]);
+          setLivePrice(
+            p >= 1000
+              ? p.toLocaleString('en-US', { maximumFractionDigits: 1 })
+              : p.toLocaleString('en-US', { maximumFractionDigits: 2 })
+          );
+        }
+      } catch {
+        // fallback approximate
+        if (!cancelled) {
+          const fallbacks: Record<string, string> = {
+            ETH: '3,842.50',
+            BTC: '94,210.00',
+            SOL: '178.40',
+          };
+          setLivePrice(fallbacks[pair] || '—');
+        }
+      }
+    };
+
+    load();
+    const id = setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [selectedBot, pair]);
 
   const botMeta: Record<Exclude<BotType, null>, { title: string; icon: React.ReactNode }> = {
     Grid: {
@@ -70,6 +124,8 @@ export default function Home() {
   const handleBotClick = (bot: BotType) => {
     if (!bot) return;
     setSelectedBot(bot);
+    setPair('ETH');
+    setPairOpen(false);
     setInvestAmount('500');
     setDirection('LONG');
     setLeverage(2);
@@ -122,13 +178,17 @@ export default function Home() {
       }}
       onMouseEnter={(e) => {
         const tip = e.currentTarget.querySelector('.hq-tip') as HTMLElement;
-        if (tip) tip.style.opacity = '1';
-        if (tip) tip.style.visibility = 'visible';
+        if (tip) {
+          tip.style.opacity = '1';
+          tip.style.visibility = 'visible';
+        }
       }}
       onMouseLeave={(e) => {
         const tip = e.currentTarget.querySelector('.hq-tip') as HTMLElement;
-        if (tip) tip.style.opacity = '0';
-        if (tip) tip.style.visibility = 'hidden';
+        if (tip) {
+          tip.style.opacity = '0';
+          tip.style.visibility = 'hidden';
+        }
       }}
     >
       <span
@@ -179,6 +239,55 @@ export default function Home() {
       </span>
     </span>
   );
+
+  // Simple coin icons
+  const CoinIcon = ({ symbol, size = 18 }: { symbol: string; size?: number }) => {
+    if (symbol === 'ETH') {
+      return (
+        <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
+          <circle cx="16" cy="16" r="16" fill="#627EEA" />
+          <path d="M16.5 4v8.87l7.5 3.35L16.5 4z" fill="#fff" fillOpacity="0.6" />
+          <path d="M16.5 4L9 16.22l7.5-3.35V4z" fill="#fff" />
+          <path d="M16.5 21.97v6.03L24 17.62l-7.5 4.35z" fill="#fff" fillOpacity="0.6" />
+          <path d="M16.5 28v-6.03L9 17.62 16.5 28z" fill="#fff" />
+          <path d="M16.5 20.57l7.5-4.35-7.5-3.35v7.7z" fill="#fff" fillOpacity="0.2" />
+          <path d="M9 16.22l7.5 4.35v-7.7L9 16.22z" fill="#fff" fillOpacity="0.6" />
+        </svg>
+      );
+    }
+    if (symbol === 'BTC') {
+      return (
+        <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
+          <circle cx="16" cy="16" r="16" fill="#F7931A" />
+          <path d="M22.5 14.2c.3-2-1.2-3.1-3.3-3.8l.7-2.7-1.6-.4-.7 2.6c-.4-.1-.9-.2-1.3-.3l.7-2.6-1.6-.4-.7 2.7c-.4-.1-.7-.2-1.1-.3l-2.3-.6-.4 1.8s1.2.3 1.2.3c.7.2.8.6.8 1l-.8 3.1c0 .1.1.1.1.2h-.1l-1.1 4.5c-.1.2-.3.5-.7.4 0 0-1.2-.3-1.2-.3l-.8 1.9 2.1.5c.4.1.8.2 1.2.3l-.7 2.8 1.6.4.7-2.7c.4.1.9.2 1.3.3l-.7 2.7 1.6.4.7-2.8c2.9.5 5 .3 5.9-2.3.8-2.1 0-3.3-1.6-4.1 1.1-.3 2-1 2.2-2.5zm-4 5.5c-.5 2.2-4.2 1-5.4.7l1-3.8c1.2.3 5 .9 4.4 3.1zm.6-5.5c-.5 2-3.6.9-4.6.7l.9-3.4c1 .2 4.2.7 3.7 2.7z" fill="#fff" />
+        </svg>
+      );
+    }
+    if (symbol === 'SOL') {
+      return (
+        <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
+          <circle cx="16" cy="16" r="16" fill="#000" />
+          <path d="M10.5 20.5l1.8-1.8h9.4l-1.8 1.8H10.5zM10.5 13.3l1.8-1.8h9.4l-1.8 1.8H10.5zM21.7 15.1l-1.8 1.8h-9.4l1.8-1.8h9.4z" fill="url(#solGrad)" />
+          <defs>
+            <linearGradient id="solGrad" x1="10" y1="12" x2="22" y2="21" gradientUnits="userSpaceOnUse">
+              <stop stopColor="#00FFA3" />
+              <stop offset="1" stopColor="#DC1FFF" />
+            </linearGradient>
+          </defs>
+        </svg>
+      );
+    }
+    // USDC
+    return (
+      <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
+        <circle cx="16" cy="16" r="16" fill="#2775CA" />
+        <path d="M20.5 18.3c0-1.4-0.8-2.5-3.5-3.1-1.9-.4-2.3-.9-2.3-1.6 0-.7.5-1.2 1.6-1.2 1 0 1.5.3 1.8 1.1.1.2.3.3.5.3h1.2c.3 0 .5-.3.4-.6-.3-1.3-1.3-2.2-2.8-2.5V9.3c0-.3-.2-.5-.5-.5h-1.1c-.3 0-.5.2-.5.5v1.1c-1.8.3-3 1.5-3 3.2 0 1.5.9 2.5 3.4 3.1 1.6.4 2.3.8 2.3 1.7 0 1-.9 1.4-2 1.4-1.3 0-1.9-.5-2.2-1.3-.1-.2-.3-.4-.5-.4h-1.3c-.3 0-.5.2-.5.5.2 1.5 1.3 2.6 3.3 2.9v1.2c0 .3.2.5.5.5h1.1c.3 0 .5-.2.5-.5v-1.1c1.9-.3 3.1-1.6 3.1-3.4z" fill="#fff" />
+        <path d="M13.2 25.3c-5.1-1.5-8-6.9-6.5-12 1.1-3.6 4.1-6 7.7-6.5.3 0 .5-.2.5-.5V5.1c0-.3-.2-.5-.5-.5-6.9.8-12 6.9-11.2 13.9.6 4.7 4.1 8.6 8.7 9.8.3.1.6-.1.6-.4v-1.2c0-.3-.1-.5-.3-.6-.7-.2-1.3-.4-1.8-.7zM20.3 4.6c-.3 0-.5.2-.5.5v1.2c0 .3.1.5.3.6 5.1 1.5 8 6.9 6.5 12-1.1 3.6-4.1 6-7.7 6.5-.3 0-.5.2-.5.5v1.2c0 .3.2.5.5.5 6.9-.8 12-6.9 11.2-13.9-.6-4.7-4.1-8.6-8.7-9.8-.3-.1-.6.1-.6.4-.1.1-.3.2-.5.3z" fill="#fff" />
+      </svg>
+    );
+  };
+
+  const currentPair = PAIRS.find((p) => p.id === pair)!;
 
   return (
     <main
@@ -271,15 +380,7 @@ export default function Home() {
               HYPER QUANT
             </h1>
 
-            <p
-              style={{
-                color: '#e6edf3',
-                fontSize: '17px',
-                fontWeight: 600,
-                margin: '0 0 20px',
-                letterSpacing: '-0.01em',
-              }}
-            >
+            <p style={{ color: '#e6edf3', fontSize: '17px', fontWeight: 600, margin: '0 0 20px', letterSpacing: '-0.01em' }}>
               Create Bot
             </p>
           </>
@@ -296,26 +397,10 @@ export default function Home() {
           >
             {(
               [
-                {
-                  id: 'Grid' as BotType,
-                  title: 'Grid',
-                  points: ['Extract profit from volatility', 'Market making', 'Trailing for every grid'],
-                },
-                {
-                  id: 'DCA' as BotType,
-                  title: 'DCA',
-                  points: ['Use averaging', 'Take profit on any market', 'Technical + Order Flow'],
-                },
-                {
-                  id: 'Combo' as BotType,
-                  title: 'Combo',
-                  points: ['Combined strategy', 'Grid stability', 'DCA reliability'],
-                },
-                {
-                  id: 'Quant' as BotType,
-                  title: 'Quant',
-                  points: ['3 trading systems', 'Order Flow + TA', 'Pump/dump protection'],
-                },
+                { id: 'Grid' as BotType, title: 'Grid', points: ['Extract profit from volatility', 'Market making', 'Trailing for every grid'] },
+                { id: 'DCA' as BotType, title: 'DCA', points: ['Use averaging', 'Take profit on any market', 'Technical + Order Flow'] },
+                { id: 'Combo' as BotType, title: 'Combo', points: ['Combined strategy', 'Grid stability', 'DCA reliability'] },
+                { id: 'Quant' as BotType, title: 'Quant', points: ['3 trading systems', 'Order Flow + TA', 'Pump/dump protection'] },
               ] as const
             ).map((bot) => (
               <div
@@ -427,6 +512,92 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Pair selector */}
+            <div style={{ marginBottom: '18px', position: 'relative' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+                Pair
+              </label>
+              <button
+                type="button"
+                onClick={() => setPairOpen((v) => !v)}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                  border: pairOpen ? '1px solid rgba(46,230,197,0.45)' : '1px solid #30363d',
+                  background: '#0d1117',
+                  color: '#e6edf3',
+                  fontSize: 15,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <div style={{ zIndex: 1 }}><CoinIcon symbol={currentPair.base} size={22} /></div>
+                  <div style={{ marginLeft: -6, zIndex: 0 }}><CoinIcon symbol={currentPair.quote} size={22} /></div>
+                </div>
+                <span style={{ flex: 1, textAlign: 'left' }}>{currentPair.label}</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ opacity: 0.6, transform: pairOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+                  <path d="M6 9l6 6 6-6" stroke="#8b949e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+
+              {pairOpen && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    right: 0,
+                    top: 'calc(100% + 6px)',
+                    background: '#161b22',
+                    border: '1px solid #30363d',
+                    borderRadius: 12,
+                    overflow: 'hidden',
+                    zIndex: 30,
+                    boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+                  }}
+                >
+                  {PAIRS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setPair(p.id);
+                        setPairOpen(false);
+                      }}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '12px 14px',
+                        border: 'none',
+                        background: pair === p.id ? 'rgba(46,230,197,0.08)' : 'transparent',
+                        color: '#e6edf3',
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <div style={{ zIndex: 1 }}><CoinIcon symbol={p.base} size={20} /></div>
+                        <div style={{ marginLeft: -5, zIndex: 0 }}><CoinIcon symbol={p.quote} size={20} /></div>
+                      </div>
+                      {p.label}
+                      {pair === p.id && (
+                        <span style={{ marginLeft: 'auto', color: '#2ee6c5', fontSize: 12 }}>✓</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Investment */}
             <div style={{ marginBottom: '18px' }}>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
@@ -507,7 +678,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Leverage slider */}
+            {/* Leverage */}
             <div style={{ marginBottom: '18px' }}>
               <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '10px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
                 <span>Leverage · max 3×</span>
@@ -608,10 +779,13 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Trading Range */}
+            {/* Trading Range + live price */}
             <div style={{ marginBottom: '18px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
-                Trading Range
+              <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
+                <span>Trading Range</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#2ee6c5', letterSpacing: 'normal', textTransform: 'none' }}>
+                  {currentPair.base} · ${livePrice ?? '…'}
+                </span>
               </label>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <input
@@ -687,7 +861,10 @@ export default function Home() {
             </button>
 
             <button
-              onClick={() => setSelectedBot(null)}
+              onClick={() => {
+                setSelectedBot(null);
+                setPairOpen(false);
+              }}
               style={{
                 marginTop: 12,
                 width: '100%',
