@@ -296,11 +296,11 @@ export default function Home() {
             <input
               id="telegram-id"
               type="text"
-              inputMode="numeric"
+              inputMode="text"
               autoComplete="off"
-              placeholder="Enter ID from the Telegram bot"
+              placeholder="Enter your @Nickname from the Telegram"
               value={telegramId}
-              onChange={(e) => setTelegramId(e.target.value.replace(/[^\d]/g, ''))}
+              onChange={(e) => setTelegramId(e.target.value.replace(/[^a-zA-Z0-9_@]/g, ''))}
               style={{
                 width: '100%',
                 boxSizing: 'border-box',
@@ -332,7 +332,7 @@ export default function Home() {
             }}
           >
             <span style={{ color: '#e3b341', fontWeight: 600 }}>Note:</span>{' '}
-            Enter your Telegram ID if you have an active paid subscription.
+            Enter your Telegram @Nickname if you have an active paid subscription.
             Leave this field empty on the free plan — a builder fee of{' '}
             <span style={{ color: '#2ee6c5' }}>0.01%</span> will apply
             (up to <span style={{ color: '#2ee6c5' }}>0.03%</span> for our MVP Quant Bot).
@@ -475,4 +475,5 @@ export default function Home() {
       </div>
     </main>
   );
+}
 }
