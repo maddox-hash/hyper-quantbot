@@ -58,6 +58,17 @@ export default function Home() {
   };
   const sharpe = calcSharpe();
 
+  // Dollar PnL from Invested × All %
+  const calcDollarPnl = () => {
+    const inv = parseFloat(String(invested).replace(/[^0-9.]/g, '')) || 0;
+    const pct = parseFloat(String(pnlAll).replace(/[^0-9.\-]/g, '')) || 0;
+    const dollars = inv * (pct / 100);
+    const sign = dollars >= 0 ? '+' : '';
+    return sign + '$' + Math.abs(dollars).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const dollarPnl = calcDollarPnl();
+  const dollarPnlPositive = !dollarPnl.startsWith('-');
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const markerId = useRef(0);
 
@@ -99,7 +110,6 @@ export default function Home() {
     if (selectedBot) fetchCandles(interval);
   }, [selectedBot, interval, fetchCandles]);
 
-  // Draw chart
   useEffect(() => {
     if (!selectedBot || !candles.length || !canvasRef.current) return;
     const canvas = canvasRef.current;
@@ -404,7 +414,6 @@ export default function Home() {
           }}
         />
 
-        {/* Logo */}
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '14px' }}>
           <div
             style={{
@@ -451,7 +460,6 @@ export default function Home() {
           {selectedBot ? 'My Test QuantBot (#6)' : 'Create Bot'}
         </p>
 
-        {/* BOT CARDS */}
         {!selectedBot && (
           <div
             style={{
@@ -593,10 +601,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* CHART VIEW */}
         {selectedBot && (
           <div style={{ width: '100%' }}>
-            {/* Top bar */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <button
                 onClick={() => {
@@ -645,7 +651,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Tools */}
             {showTools && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', justifyContent: 'center', marginBottom: '10px' }}>
                 {[
@@ -690,7 +695,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* Chart */}
             <div
               style={{
                 position: 'relative',
@@ -739,7 +743,7 @@ export default function Home() {
               <span>Drag to pan</span>
             </div>
 
-            {/* STATS PANEL */}
+            {/* STATS */}
             <div
               style={{
                 marginTop: '16px',
@@ -773,10 +777,19 @@ export default function Home() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', padding: '0 2px' }}>
-                <span style={{ fontSize: '12px', color: '#8b949e' }}>Invested</span>
-                <span style={{ fontSize: '15px', fontWeight: 600, color: '#e6edf3' }}>
-                  $<Editable value={invested} onChange={setInvested} color="#e6edf3" fontSize="15px" />
+              {/* Invested + Dollar PnL */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', padding: '0 2px', flexWrap: 'wrap', gap: '8px' }}>
+                <span style={{ fontSize: '13px', color: '#8b949e' }}>
+                  Invested{' '}
+                  <span style={{ color: '#e6edf3', fontWeight: 600 }}>
+                    $<Editable value={invested} onChange={setInvested} color="#e6edf3" fontSize="13px" />
+                  </span>
+                </span>
+                <span style={{ fontSize: '13px', color: '#8b949e' }}>
+                  PnL{' '}
+                  <span style={{ color: dollarPnlPositive ? '#3fb950' : '#f85149', fontWeight: 700 }}>
+                    {dollarPnl}
+                  </span>
                 </span>
               </div>
 
@@ -820,7 +833,7 @@ export default function Home() {
                 }}
               >
                 <span>Avg. Hold · <span style={{ color: '#e6edf3', fontWeight: 600 }}>4.2h</span></span>
-                <span>Max DD · <span style={{ color: '#f85149', fontWeight: 600 }}>-6.8%</span></span>
+                <span>Max DD · <span style={{ color: '#f85149', fontWeight: 600 }}>-1.8%</span></span>
                 <span>Sharpe · <span style={{ color: '#2ee6c5', fontWeight: 600 }}>{sharpe}</span></span>
               </div>
             </div>
@@ -849,7 +862,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Footer */}
         <div
           style={{
             marginTop: '20px',
