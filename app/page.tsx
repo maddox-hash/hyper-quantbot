@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 type BotType = 'Grid' | 'DCA' | 'Combo' | 'Quant' | null;
-type Tool = 'none' | 'arrowUp' | 'arrowDown' | 'buyLevel' | 'sellLevel';
+type Tool = 'none' | 'arrowUp' | 'arrowDown' | 'buyLevel' | 'sellLevel' | 'sl' | 'cross';
 type Interval = '15m' | '1h' | '4h' | '1d';
 
 interface Candle {
@@ -17,7 +17,7 @@ interface Candle {
 
 interface Marker {
   id: number;
-  type: 'arrowUp' | 'arrowDown' | 'buyLevel' | 'sellLevel';
+  type: 'arrowUp' | 'arrowDown' | 'buyLevel' | 'sellLevel' | 'sl' | 'cross';
   index?: number;
   price?: number;
 }
@@ -44,12 +44,6 @@ export default function Home() {
   const [pnl1m, setPnl1m] = useState('+28.7%');
   const [pnlAll, setPnlAll] = useState('+64.2%');
   const [avgHold, setAvgHold] = useState('4.2h');
-
-  // History / playback
-  const [playback, setPlayback] = useState(false);
-  const [revealCount, setRevealCount] = useState<number | null>(null); // null = show all
-  const [hideEarlySignals, setHideEarlySignals] = useState(false);
-  const playbackRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const winrate = wins + losses > 0 ? ((wins / (wins + losses)) * 100).toFixed(1) : '0.0';
 
@@ -104,8 +98,6 @@ export default function Home() {
         }));
         setCandles(parsed);
         setOffset(Math.max(0, parsed.length - 70));
-        setRevealCount(null);
-        setHideEarlySignals(false);
       }
     } catch (e) {
       console.error(e);
@@ -118,38 +110,6 @@ export default function Home() {
     if (selectedBot) fetchCandles(interval);
   }, [selectedBot, interval, fetchCandles]);
 
-  // Playback animation
-  useEffect(() => {
-    if (!playback || !candles.length) return;
-
-    const visibleWindow = 70;
-    const startFrom = Math.max(0, candles.length - visibleWindow - 40); // start a bit earlier
-    let current = startFrom + 25; // initial reveal
-
-    setShowTools(false);
-    setTool('none');
-    setRevealCount(current);
-    setOffset(Math.max(0, current - visibleWindow + 5));
-
-    playbackRef.current = setInterval(() => {
-      current += 1;
-      if (current >= candles.length) {
-        if (playbackRef.current) clearInterval(playbackRef.current);
-        setPlayback(false);
-        setRevealCount(null);
-        return;
-      }
-      setRevealCount(current);
-      // keep latest candles in view
-      setOffset(Math.max(0, current - visibleWindow + 2));
-    }, 420); // ~2.4 candles/sec — good for video
-
-    return () => {
-      if (playbackRef.current) clearInterval(playbackRef.current);
-    };
-  }, [playback, candles.length]);
-
-  // Draw chart
   useEffect(() => {
     if (!selectedBot || !candles.length || !canvasRef.current) return;
     const canvas = canvasRef.current;
@@ -171,16 +131,10 @@ export default function Home() {
     const chartW = W - padL - padR;
     const chartH = H - padT - padB;
 
-    // Apply reveal limit
-    const effectiveCandles = revealCount !== null ? candles.slice(0, revealCount) : candles;
-    if (!effectiveCandles.length) return;
-
-    const visibleCount = Math.min(70, effectiveCandles.length);
-    const startIdx = Math.max(0, Math.min(offset, effectiveCandles.length - visibleCount));
-    const visible = effectiveCandles.slice(startIdx, startIdx + visibleCount);
+    const visibleCount = Math.min(70, candles.length);
+    const startIdx = Math.max(0, Math.min(offset, candles.length - visibleCount));
+    const visible = candles.slice(startIdx, startIdx + visibleCount);
     if (!visible.length) return;
-
-    const midVisible = startIdx + Math.floor(visible.length / 2);
 
     const prices = visible.flatMap((c) => [c.h, c.l]);
     const minP = Math.min(...prices) * 0.9985;
@@ -213,20 +167,6 @@ export default function Home() {
 
     const candleW = Math.max(2.8, (chartW / visibleCount) * 0.62);
     visible.forEach((c, i) => {
-      const globalIdx = startIdx + i;
-      // Hide early signal candles if enabled
-      if (hideEarlySignals) {
-        const hasSignal = markers.some(
-          (m) => (m.type === 'arrowUp' || m.type === 'arrowDown') && m.index === globalIdx
-        );
-        if (hasSignal && globalIdx < midVisible) {
-          // draw dimmed placeholder instead
-          ctx.fillStyle = 'rgba(48,54,61,0.25)';
-          ctx.fillRect(xScale(i) - candleW / 2, padT, candleW, chartH);
-          return;
-        }
-      }
-
       const x = xScale(i);
       const yO = yScale(c.o);
       const yC = yScale(c.c);
@@ -248,39 +188,61 @@ export default function Home() {
       ctx.fillRect(x - candleW / 2, bodyTop, candleW, bodyH);
     });
 
-    // Markers (respect reveal + hide early)
     markers.forEach((m) => {
-      if (m.type === 'arrowUp' || m.type === 'arrowDown') {
-        if (m.index === undefined) return;
-        if (revealCount !== null && m.index >= revealCount) return;
-        if (hideEarlySignals && m.index < midVisible) return;
-
+      if (m.type === 'arrowUp' && m.index !== undefined) {
         const localIdx = m.index - startIdx;
         if (localIdx < 0 || localIdx >= visible.length) return;
         const c = visible[localIdx];
         const x = xScale(localIdx);
-
-        if (m.type === 'arrowUp') {
-          const y = yScale(c.l) + 12;
-          ctx.fillStyle = '#3fb950';
-          ctx.beginPath();
-          ctx.moveTo(x, y);
-          ctx.lineTo(x - 6.5, y + 11);
-          ctx.lineTo(x + 6.5, y + 11);
-          ctx.closePath();
-          ctx.fill();
-        } else {
-          const y = yScale(c.h) - 12;
-          ctx.fillStyle = '#f85149';
-          ctx.beginPath();
-          ctx.moveTo(x, y);
-          ctx.lineTo(x - 6.5, y - 11);
-          ctx.lineTo(x + 6.5, y - 11);
-          ctx.closePath();
-          ctx.fill();
-        }
+        const y = yScale(c.l) + 12;
+        ctx.fillStyle = '#3fb950';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - 6.5, y + 11);
+        ctx.lineTo(x + 6.5, y + 11);
+        ctx.closePath();
+        ctx.fill();
       }
-
+      if (m.type === 'arrowDown' && m.index !== undefined) {
+        const localIdx = m.index - startIdx;
+        if (localIdx < 0 || localIdx >= visible.length) return;
+        const c = visible[localIdx];
+        const x = xScale(localIdx);
+        const y = yScale(c.h) - 12;
+        ctx.fillStyle = '#f85149';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - 6.5, y - 11);
+        ctx.lineTo(x + 6.5, y - 11);
+        ctx.closePath();
+        ctx.fill();
+      }
+      if (m.type === 'sl' && m.index !== undefined) {
+        const localIdx = m.index - startIdx;
+        if (localIdx < 0 || localIdx >= visible.length) return;
+        const c = visible[localIdx];
+        const x = xScale(localIdx);
+        const y = yScale(c.h) - 16;
+        ctx.fillStyle = '#f85149';
+        ctx.font = 'bold 11px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('SL', x, y);
+      }
+      if (m.type === 'cross' && m.index !== undefined) {
+        const localIdx = m.index - startIdx;
+        if (localIdx < 0 || localIdx >= visible.length) return;
+        const c = visible[localIdx];
+        const x = xScale(localIdx);
+        const y = yScale(c.h) - 14;
+        ctx.strokeStyle = '#f85149';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x - 6, y - 6);
+        ctx.lineTo(x + 6, y + 6);
+        ctx.moveTo(x + 6, y - 6);
+        ctx.lineTo(x - 6, y + 6);
+        ctx.stroke();
+      }
       if ((m.type === 'buyLevel' || m.type === 'sellLevel') && m.price !== undefined) {
         const y = yScale(m.price);
         if (y < padT - 4 || y > padT + chartH + 4) return;
@@ -305,10 +267,14 @@ export default function Home() {
     [0, Math.floor(visible.length / 2), visible.length - 1].forEach((i) => {
       if (i >= visible.length) return;
       const d = new Date(visible[i].t);
-      const label =
-        interval === '1d'
-          ? `${d.getDate()}/${d.getMonth() + 1}`
-          : `${d.getDate()}/${d.getMonth() + 1} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      let label = '';
+      if (interval === '1d') {
+        label = `${d.getDate()}/${d.getMonth() + 1}`;
+      } else if (interval === '15m') {
+        label = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      } else {
+        label = `${d.getDate()}/${d.getMonth() + 1} ${String(d.getHours()).padStart(2, '0')}:00`;
+      }
       ctx.fillText(label, xScale(i), H - 6);
     });
 
@@ -330,10 +296,9 @@ export default function Home() {
       ctx.textAlign = 'center';
       ctx.fillText(last.c.toFixed(0), W - padR + 28, y + 3.5);
     }
-  }, [selectedBot, candles, offset, markers, interval, revealCount, hideEarlySignals]);
+  }, [selectedBot, candles, offset, markers, interval]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (playback) return;
     if (!canvasRef.current || !candles.length) return;
     const rect = canvasRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -352,10 +317,9 @@ export default function Home() {
     const padB = 24;
     const chartW = rect.width - padL - padR;
     const chartH = rect.height - padT - padB;
-    const effective = revealCount !== null ? candles.slice(0, revealCount) : candles;
-    const visibleCount = Math.min(70, effective.length);
-    const startIdx = Math.max(0, Math.min(offset, effective.length - visibleCount));
-    const visible = effective.slice(startIdx, startIdx + visibleCount);
+    const visibleCount = Math.min(70, candles.length);
+    const startIdx = Math.max(0, Math.min(offset, candles.length - visibleCount));
+    const visible = candles.slice(startIdx, startIdx + visibleCount);
     if (!visible.length) return;
 
     const prices = visible.flatMap((c) => [c.h, c.l]);
@@ -363,7 +327,7 @@ export default function Home() {
     const maxP = Math.max(...prices) * 1.0015;
     const range = maxP - minP || 1;
 
-    if (tool === 'arrowUp' || tool === 'arrowDown') {
+    if (tool === 'arrowUp' || tool === 'arrowDown' || tool === 'sl' || tool === 'cross') {
       const idxLocal = Math.round(((x - padL) / chartW) * (visibleCount - 1));
       if (idxLocal < 0 || idxLocal >= visible.length) return;
       setMarkers((prev) => [...prev, { id: ++markerId.current, type: tool, index: startIdx + idxLocal }]);
@@ -374,10 +338,10 @@ export default function Home() {
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!dragging || playback) return;
+    if (!dragging) return;
     const dx = e.clientX - dragStartX;
     const delta = Math.round(-dx / 7.5);
-    const maxOffset = Math.max(0, (revealCount ?? candles.length) - 70);
+    const maxOffset = Math.max(0, candles.length - 70);
     setOffset(Math.max(0, Math.min(maxOffset, dragStartOffset + delta)));
   };
 
@@ -390,15 +354,6 @@ export default function Home() {
     setTool('none');
     setShowTools(false);
     setInterval('1h');
-    setPlayback(false);
-    setRevealCount(null);
-    setHideEarlySignals(false);
-  };
-
-  const stopPlayback = () => {
-    if (playbackRef.current) clearInterval(playbackRef.current);
-    setPlayback(false);
-    setRevealCount(null);
   };
 
   const Editable = ({
@@ -678,11 +633,9 @@ export default function Home() {
 
         {selectedBot && (
           <div style={{ width: '100%' }}>
-            {/* Top bar */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <button
                 onClick={() => {
-                  if (playback) return;
                   setShowTools((v) => !v);
                   if (showTools) setTool('none');
                 }}
@@ -695,9 +648,8 @@ export default function Home() {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  cursor: playback ? 'default' : 'pointer',
+                  cursor: 'pointer',
                   color: showTools ? '#2ee6c5' : '#8b949e',
-                  opacity: playback ? 0.4 : 1,
                 }}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -706,22 +658,21 @@ export default function Home() {
                 </svg>
               </button>
 
-              <div style={{ display: 'flex', gap: '5px' }}>
+              <div style={{ display: 'flex', gap: '6px' }}>
                 {(['15m', '1h', '4h', '1d'] as Interval[]).map((tf) => (
                   <button
                     key={tf}
-                    onClick={() => !playback && setInterval(tf)}
+                    onClick={() => setInterval(tf)}
                     style={{
-                      padding: '6px 9px',
+                      padding: '6px 11px',
                       borderRadius: 8,
                       border: interval === tf ? '1px solid rgba(46,230,197,0.5)' : '1px solid #30363d',
                       background: interval === tf ? 'rgba(46,230,197,0.12)' : 'rgba(13,17,23,0.8)',
                       color: interval === tf ? '#2ee6c5' : '#8b949e',
-                      fontSize: '11.5px',
+                      fontSize: '12px',
                       fontWeight: 600,
-                      cursor: playback ? 'default' : 'pointer',
+                      cursor: 'pointer',
                       textTransform: 'uppercase',
-                      opacity: playback ? 0.5 : 1,
                     }}
                   >
                     {tf}
@@ -730,8 +681,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Tools panel */}
-            {showTools && !playback && (
+            {showTools && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', justifyContent: 'center', marginBottom: '10px' }}>
                 {[
                   { id: 'none' as Tool, label: 'Pan' },
@@ -739,16 +689,18 @@ export default function Home() {
                   { id: 'arrowDown' as Tool, label: '↓ Exit' },
                   { id: 'buyLevel' as Tool, label: 'Buy Level' },
                   { id: 'sellLevel' as Tool, label: 'Sell Level' },
+                  { id: 'sl' as Tool, label: 'SL' },
+                  { id: 'cross' as Tool, label: '✕' },
                 ].map((t) => (
                   <button
                     key={t.id}
                     onClick={() => setTool(t.id)}
                     style={{
-                      padding: '6px 10px',
+                      padding: '6px 11px',
                       borderRadius: 8,
                       border: tool === t.id ? '1px solid rgba(46,230,197,0.55)' : '1px solid #30363d',
                       background: tool === t.id ? 'rgba(46,230,197,0.12)' : 'rgba(13,17,23,0.8)',
-                      color: tool === t.id ? '#2ee6c5' : '#8b949e',
+                      color: tool === t.id ? '#2ee6c5' : t.id === 'sl' || t.id === 'cross' ? '#f85149' : '#8b949e',
                       fontSize: '11.5px',
                       fontWeight: 600,
                       cursor: 'pointer',
@@ -760,7 +712,7 @@ export default function Home() {
                 <button
                   onClick={() => setMarkers([])}
                   style={{
-                    padding: '6px 10px',
+                    padding: '6px 11px',
                     borderRadius: 8,
                     border: '1px solid #30363d',
                     background: 'rgba(13,17,23,0.8)',
@@ -772,72 +724,9 @@ export default function Home() {
                 >
                   Clear
                 </button>
-
-                {/* History helpers */}
-                <button
-                  onClick={() => setHideEarlySignals((v) => !v)}
-                  style={{
-                    padding: '6px 10px',
-                    borderRadius: 8,
-                    border: hideEarlySignals ? '1px solid rgba(227,179,65,0.55)' : '1px solid #30363d',
-                    background: hideEarlySignals ? 'rgba(227,179,65,0.12)' : 'rgba(13,17,23,0.8)',
-                    color: hideEarlySignals ? '#e3b341' : '#8b949e',
-                    fontSize: '11.5px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Hide early signals
-                </button>
-                <button
-                  onClick={() => setPlayback(true)}
-                  style={{
-                    padding: '6px 10px',
-                    borderRadius: 8,
-                    border: '1px solid rgba(46,230,197,0.45)',
-                    background: 'rgba(46,230,197,0.1)',
-                    color: '#2ee6c5',
-                    fontSize: '11.5px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  ▶ Play history
-                </button>
               </div>
             )}
 
-            {/* Playback indicator */}
-            {playback && (
-              <div
-                style={{
-                  marginBottom: '8px',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  gap: '10px',
-                }}
-              >
-                <span style={{ fontSize: '12px', color: '#2ee6c5', fontWeight: 600 }}>● Live playback</span>
-                <button
-                  onClick={stopPlayback}
-                  style={{
-                    padding: '4px 10px',
-                    borderRadius: 7,
-                    border: '1px solid #30363d',
-                    background: 'rgba(13,17,23,0.9)',
-                    color: '#8b949e',
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Stop
-                </button>
-              </div>
-            )}
-
-            {/* Chart */}
             <div
               style={{
                 position: 'relative',
@@ -871,7 +760,7 @@ export default function Home() {
                 style={{
                   width: '100%',
                   height: '100%',
-                  cursor: playback ? 'default' : tool === 'none' || !showTools ? (dragging ? 'grabbing' : 'grab') : 'crosshair',
+                  cursor: tool === 'none' || !showTools ? (dragging ? 'grabbing' : 'grab') : 'crosshair',
                   display: 'block',
                 }}
                 onPointerDown={handlePointerDown}
@@ -883,10 +772,9 @@ export default function Home() {
 
             <div style={{ marginTop: '7px', fontSize: '10.5px', color: '#6e7681', display: 'flex', justifyContent: 'space-between' }}>
               <span>BTC-PERP · {interval.toUpperCase()} · Hyperliquid</span>
-              <span>{playback ? 'Playing…' : 'Drag to pan'}</span>
+              <span>Drag to pan</span>
             </div>
 
-            {/* STATS */}
             <div
               style={{
                 marginTop: '16px',
@@ -976,9 +864,7 @@ export default function Home() {
               >
                 <span>
                   Avg. Hold ·{' '}
-                  <span style={{ color: '#e6edf3', fontWeight: 600 }}>
-                    <Editable value={avgHold} onChange={setAvgHold} color="#e6edf3" fontSize="11.5px" />
-                  </span>
+                  <Editable value={avgHold} onChange={setAvgHold} color="#e6edf3" fontSize="11.5px" fontWeight={600} />
                 </span>
                 <span>Max DD · <span style={{ color: '#f85149', fontWeight: 600 }}>-1.8%</span></span>
                 <span>Sharpe · <span style={{ color: '#2ee6c5', fontWeight: 600 }}>{sharpe}</span></span>
@@ -987,7 +873,6 @@ export default function Home() {
 
             <button
               onClick={() => {
-                stopPlayback();
                 setSelectedBot(null);
                 setMarkers([]);
                 setTool('none');
