@@ -5,12 +5,12 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useSignTypedData } from 'wagmi';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 
-// --- SETTINGS --- final
+// --- SETTINGS ---
 const BUILDER_ADDRESS = '0x8E5B541b59C43cCD688215C1c52CB6E4B885D5e9';
 const MAX_FEE_RATE = '0.03%';
 const HYPERLIQUID_API = 'https://api.hyperliquid.xyz/exchange';
 // Change this to your bot username if different
-const TELEGRAM_BOT_URL = 'https://t.me/hyperquant_trade_bot';
+const TELEGRAM_BOT_URL = 'https://t.me/hyperquantbot';
 
 // IMPORTANT: when signing through a real browser wallet (MetaMask/WalletConnect via
 // wagmi), domain.chainId MUST match the network the wallet is actually connected to
@@ -189,7 +189,7 @@ export default function Home() {
           border: '1px solid rgba(48, 54, 61, 0.9)',
           borderRadius: '20px',
           padding: '40px 28px 36px',
-          maxWidth: '420px',
+          maxWidth: '560px',
           width: '100%',
           textAlign: 'center',
           boxShadow:
@@ -255,11 +255,269 @@ export default function Home() {
             color: '#8b949e',
             fontSize: '14px',
             lineHeight: 1.5,
-            margin: '0 0 28px',
+            margin: '0 0 24px',
           }}
         >
           Algorithmic Trading System
         </p>
+
+        {/* ===== BOT TYPES SECTION ===== */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+            gap: '14px',
+            marginBottom: '28px',
+            width: '100%',
+          }}
+        >
+          {/* GRID */}
+          <div
+            style={{
+              background: 'rgba(13, 17, 23, 0.7)',
+              border: '1px solid rgba(48, 54, 61, 0.9)',
+              borderRadius: '14px',
+              padding: '18px 14px 16px',
+              textAlign: 'center',
+              transition: 'border-color 0.2s, box-shadow 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
+              e.currentTarget.style.boxShadow = '0 0 20px rgba(46, 230, 197, 0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(48, 54, 61, 0.9)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div
+              style={{
+                width: 56,
+                height: 56,
+                margin: '0 auto 12px',
+                borderRadius: 14,
+                background: 'rgba(46, 230, 197, 0.08)',
+                border: '1px solid rgba(46, 230, 197, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 16px rgba(46, 230, 197, 0.12)',
+              }}
+            >
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="#2ee6c5" strokeWidth="1.8" />
+                <rect x="14" y="3" width="7" height="7" rx="1.5" stroke="#2ee6c5" strokeWidth="1.8" />
+                <rect x="3" y="14" width="7" height="7" rx="1.5" stroke="#2ee6c5" strokeWidth="1.8" />
+                <rect x="14" y="14" width="7" height="7" rx="1.5" stroke="#5ef0d4" strokeWidth="1.8" />
+              </svg>
+            </div>
+            <div style={{ fontWeight: 700, fontSize: '15px', color: '#e6edf3', marginBottom: '8px' }}>
+              Grid
+            </div>
+            <ul
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: 'none',
+                fontSize: '11.5px',
+                lineHeight: 1.45,
+                color: '#8b949e',
+                textAlign: 'left',
+              }}
+            >
+              <li style={{ marginBottom: 4 }}>• Извлекайте прибыль из волатильности</li>
+              <li style={{ marginBottom: 4 }}>• Маркетмейкинг</li>
+              <li>• Трейлинг для каждой сетки — не упустите сильное движение</li>
+            </ul>
+          </div>
+
+          {/* DCA */}
+          <div
+            style={{
+              background: 'rgba(13, 17, 23, 0.7)',
+              border: '1px solid rgba(48, 54, 61, 0.9)',
+              borderRadius: '14px',
+              padding: '18px 14px 16px',
+              textAlign: 'center',
+              transition: 'border-color 0.2s, box-shadow 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
+              e.currentTarget.style.boxShadow = '0 0 20px rgba(46, 230, 197, 0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(48, 54, 61, 0.9)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div
+              style={{
+                width: 56,
+                height: 56,
+                margin: '0 auto 12px',
+                borderRadius: 14,
+                background: 'rgba(46, 230, 197, 0.08)',
+                border: '1px solid rgba(46, 230, 197, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 16px rgba(46, 230, 197, 0.12)',
+              }}
+            >
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                <path d="M4 18h16" stroke="#2ee6c5" strokeWidth="1.6" strokeLinecap="round" />
+                <path d="M6 18V14" stroke="#2ee6c5" strokeWidth="2.2" strokeLinecap="round" />
+                <path d="M10 18V11" stroke="#2ee6c5" strokeWidth="2.2" strokeLinecap="round" />
+                <path d="M14 18V8" stroke="#5ef0d4" strokeWidth="2.2" strokeLinecap="round" />
+                <path d="M18 18V5" stroke="#5ef0d4" strokeWidth="2.2" strokeLinecap="round" />
+                <path d="M4 10l4-3 4 2 4-4 4 1" stroke="#2ee6c5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+              </svg>
+            </div>
+            <div style={{ fontWeight: 700, fontSize: '15px', color: '#e6edf3', marginBottom: '8px' }}>
+              DCA
+            </div>
+            <ul
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: 'none',
+                fontSize: '11.5px',
+                lineHeight: 1.45,
+                color: '#8b949e',
+                textAlign: 'left',
+              }}
+            >
+              <li style={{ marginBottom: 4 }}>• Используйте усреднение</li>
+              <li style={{ marginBottom: 4 }}>• Забирайте прибыль на любом рынке</li>
+              <li style={{ marginBottom: 4 }}>• Накапливайте активы</li>
+              <li>• Тех. индикаторы + Order Flow фильтры</li>
+            </ul>
+          </div>
+
+          {/* COMBO */}
+          <div
+            style={{
+              background: 'rgba(13, 17, 23, 0.7)',
+              border: '1px solid rgba(48, 54, 61, 0.9)',
+              borderRadius: '14px',
+              padding: '18px 14px 16px',
+              textAlign: 'center',
+              transition: 'border-color 0.2s, box-shadow 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
+              e.currentTarget.style.boxShadow = '0 0 20px rgba(46, 230, 197, 0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(48, 54, 61, 0.9)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div
+              style={{
+                width: 56,
+                height: 56,
+                margin: '0 auto 12px',
+                borderRadius: 14,
+                background: 'rgba(46, 230, 197, 0.08)',
+                border: '1px solid rgba(46, 230, 197, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 16px rgba(46, 230, 197, 0.12)',
+              }}
+            >
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                <circle cx="9" cy="12" r="5.5" stroke="#2ee6c5" strokeWidth="1.7" />
+                <circle cx="15" cy="12" r="5.5" stroke="#5ef0d4" strokeWidth="1.7" />
+                <path d="M9 12h6" stroke="#2ee6c5" strokeWidth="1.5" strokeLinecap="round" opacity="0.6" />
+              </svg>
+            </div>
+            <div style={{ fontWeight: 700, fontSize: '15px', color: '#e6edf3', marginBottom: '8px' }}>
+              Combo
+            </div>
+            <ul
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: 'none',
+                fontSize: '11.5px',
+                lineHeight: 1.45,
+                color: '#8b949e',
+                textAlign: 'left',
+              }}
+            >
+              <li style={{ marginBottom: 4 }}>• Совмещённая стратегия</li>
+              <li style={{ marginBottom: 4 }}>• Стабильность Grid bot</li>
+              <li>• Надёжность и прибыль DCA</li>
+            </ul>
+          </div>
+
+          {/* QUANT */}
+          <div
+            style={{
+              background: 'rgba(13, 17, 23, 0.7)',
+              border: '1px solid rgba(48, 54, 61, 0.9)',
+              borderRadius: '14px',
+              padding: '18px 14px 16px',
+              textAlign: 'center',
+              transition: 'border-color 0.2s, box-shadow 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
+              e.currentTarget.style.boxShadow = '0 0 20px rgba(46, 230, 197, 0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(48, 54, 61, 0.9)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div
+              style={{
+                width: 56,
+                height: 56,
+                margin: '0 auto 12px',
+                borderRadius: 14,
+                background: 'rgba(46, 230, 197, 0.08)',
+                border: '1px solid rgba(46, 230, 197, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 16px rgba(46, 230, 197, 0.12)',
+              }}
+            >
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                <path d="M3 17l5-6 4 3 5-8 4 4" stroke="#2ee6c5" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M3 20h18" stroke="#5ef0d4" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+                <circle cx="8" cy="11" r="1.3" fill="#2ee6c5" />
+                <circle cx="12" cy="14" r="1.3" fill="#2ee6c5" />
+                <circle cx="17" cy="6" r="1.3" fill="#5ef0d4" />
+              </svg>
+            </div>
+            <div style={{ fontWeight: 700, fontSize: '15px', color: '#e6edf3', marginBottom: '8px' }}>
+              Quant
+            </div>
+            <ul
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: 'none',
+                fontSize: '11.5px',
+                lineHeight: 1.45,
+                color: '#8b949e',
+                textAlign: 'left',
+              }}
+            >
+              <li style={{ marginBottom: 3 }}>• 3 встроенных торговых системы</li>
+              <li style={{ marginBottom: 3 }}>• Технический анализ рынка</li>
+              <li style={{ marginBottom: 3 }}>• Анализ лимитных ордеров</li>
+              <li style={{ marginBottom: 3 }}>• Order Flow</li>
+              <li style={{ marginBottom: 3 }}>• Анализ волатильности</li>
+              <li>• Защита от памп/дамп</li>
+            </ul>
+          </div>
+        </div>
+        {/* ===== END BOT TYPES ===== */}
 
         <div style={{ textAlign: 'left', marginBottom: '18px' }}>
           <label
@@ -296,11 +554,11 @@ export default function Home() {
             <input
               id="telegram-id"
               type="text"
-              inputMode="text"
+              inputMode="numeric"
               autoComplete="off"
-              placeholder="Enter your @Nickname from the Telegram"
+              placeholder="Enter ID from the Telegram bot"
               value={telegramId}
-              onChange={(e) => setTelegramId(e.target.value.replace(/[^a-zA-Z0-9_@]/g, ''))}
+              onChange={(e) => setTelegramId(e.target.value.replace(/[^\d]/g, ''))}
               style={{
                 width: '100%',
                 boxSizing: 'border-box',
@@ -332,7 +590,7 @@ export default function Home() {
             }}
           >
             <span style={{ color: '#e3b341', fontWeight: 600 }}>Note:</span>{' '}
-            Enter your Telegram @Nickname if you have an active paid subscription.
+            Enter your Telegram ID if you have an active paid subscription.
             Leave this field empty on the free plan — a builder fee of{' '}
             <span style={{ color: '#2ee6c5' }}>0.01%</span> will apply
             (up to <span style={{ color: '#2ee6c5' }}>0.03%</span> for our MVP Quant Bot).
