@@ -1,293 +1,161 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { useAccount, useSignTypedData } from 'wagmi';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 
-type BotType = 'Grid' | 'DCA' | 'Combo' | 'Quant' | null;
-type Direction = 'LONG' | 'SHORT';
-type MarginMode = 'cross' | 'isolated';
-type TradeMode = 'positional' | 'normal' | 'aggressive';
+// --- SETTINGS ---
+const BUILDER_ADDRESS = '0x8E5B541b59C43cCD688215C1c52CB6E4B885D5e9';
+const MAX_FEE_RATE = '0.03%';
+const HYPERLIQUID_API = 'https://api.hyperliquid.xyz/exchange';
+// Change this to your bot username if different
+const TELEGRAM_BOT_URL = 'https://t.me/hyperquant_trade_bot';
 
-const PAIRS = [
-  { id: 'ETH', label: 'ETH / USDC', base: 'ETH', quote: 'USDC' },
-  { id: 'BTC', label: 'BTC / USDC', base: 'BTC', quote: 'USDC' },
-  { id: 'SOL', label: 'SOL / USDC', base: 'SOL', quote: 'USDC' },
-] as const;
+// IMPORTANT: when signing through a real browser wallet (MetaMask/WalletConnect via
+// wagmi), domain.chainId MUST match the network the wallet is actually connected to
+// (Arbitrum One = 42161), otherwise the wallet itself rejects the request with
+// "Invalid parameters were provided to the RPC method" before it ever reaches Hyperliquid.
+const domain = {
+  name: 'HyperliquidSignTransaction',
+  version: '1',
+  chainId: 42161,
+  verifyingContract: '0x0000000000000000000000000000000000000000',
+} as const;
 
-type PairId = (typeof PAIRS)[number]['id'];
+const agentTypes = {
+  'HyperliquidTransaction:ApproveAgent': [
+    { name: 'hyperliquidChain', type: 'string' },
+    { name: 'agentAddress', type: 'address' },
+    { name: 'agentName', type: 'string' },
+    { name: 'nonce', type: 'uint64' },
+  ],
+} as const;
+
+const builderFeeTypes = {
+  'HyperliquidTransaction:ApproveBuilderFee': [
+    { name: 'hyperliquidChain', type: 'string' },
+    { name: 'maxFeeRate', type: 'string' },
+    { name: 'builder', type: 'address' },
+    { name: 'nonce', type: 'uint64' },
+  ],
+} as const;
+
+function splitSignature(signature: `0x${string}`) {
+  return {
+    r: signature.slice(0, 66) as `0x${string}`,
+    s: (`0x${signature.slice(66, 130)}`) as `0x${string}`,
+    v: parseInt(signature.slice(130, 132), 16),
+  };
+}
+
+async function submitToHyperliquid(
+  action: Record<string, unknown>,
+  signature: { r: string; s: string; v: number },
+  nonce: number
+) {
+  const res = await fetch(HYPERLIQUID_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, nonce, signature }),
+  });
+  const data = await res.json();
+  if (data.status !== 'ok') {
+    throw new Error(
+      data.response ? JSON.stringify(data.response) : 'Hyperliquid API rejected the action'
+    );
+  }
+  return data;
+}
 
 export default function Home() {
-  const [selectedBot, setSelectedBot] = useState<BotType>(null);
+  const { address, isConnected } = useAccount();
+  const { signTypedDataAsync } = useSignTypedData();
 
-  const [pair, setPair] = useState<PairId>('ETH');
-  const [pairOpen, setPairOpen] = useState(false);
-  const [livePrice, setLivePrice] = useState<string | null>(null);
+  const [telegramId, setTelegramId] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
 
-  const [investAmount, setInvestAmount] = useState('500');
-  const [direction, setDirection] = useState<Direction>('LONG');
-  const [leverage, setLeverage] = useState(2);
-  const [marginMode, setMarginMode] = useState<MarginMode>('cross');
-  const [tradeMode, setTradeMode] = useState<TradeMode>('normal');
-  const [rangeLow, setRangeLow] = useState('');
-  const [rangeHigh, setRangeHigh] = useState('');
-  const [taEnabled, setTaEnabled] = useState(true);
-  const [orderFlowEnabled, setOrderFlowEnabled] = useState(true);
-  const [volumesEnabled, setVolumesEnabled] = useState(false);
+  const handleApproveAndActivate = async () => {
+    if (!address) return;
+    setLoading(true);
+    setStatus('Generating trading agent...');
 
-  const balance = '26,525.02';
+    try {
+      const agentPrivKey = generatePrivateKey();
+      const agentAccount = privateKeyToAccount(agentPrivKey);
 
-  // Live mid price from Hyperliquid
-  useEffect(() => {
-    if (!selectedBot) return;
-    let cancelled = false;
+      const agentNonce = Date.now();
+      const builderNonce = agentNonce + 1;
 
-    const load = async () => {
-      try {
-        const res = await fetch('https://api.hyperliquid.xyz/info', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'allMids' }),
-        });
-        const data = await res.json();
-        if (!cancelled && data && data[pair]) {
-          const p = parseFloat(data[pair]);
-          setLivePrice(
-            p >= 1000
-              ? p.toLocaleString('en-US', { maximumFractionDigits: 1 })
-              : p.toLocaleString('en-US', { maximumFractionDigits: 2 })
-          );
-        }
-      } catch {
-        // fallback approximate
-        if (!cancelled) {
-          const fallbacks: Record<string, string> = {
-            ETH: '3,842.50',
-            BTC: '94,210.00',
-            SOL: '178.40',
-          };
-          setLivePrice(fallbacks[pair] || '—');
-        }
-      }
-    };
+      setStatus('Sign agent approval in your wallet (1/2)...');
+      const agentAction = {
+        type: 'approveAgent',
+        hyperliquidChain: 'Mainnet',
+        signatureChainId: '0xa4b1',
+        agentAddress: agentAccount.address,
+        agentName: 'HyperQuant',
+        nonce: agentNonce,
+      };
+      const agentSig = await signTypedDataAsync({
+        domain,
+        types: agentTypes,
+        primaryType: 'HyperliquidTransaction:ApproveAgent',
+        message: {
+          hyperliquidChain: 'Mainnet',
+          agentAddress: agentAccount.address as `0x${string}`,
+          agentName: 'HyperQuant',
+          nonce: BigInt(agentNonce),
+        },
+      });
+      setStatus('Registering agent on Hyperliquid...');
+      await submitToHyperliquid(agentAction, splitSignature(agentSig), agentNonce);
 
-    load();
-    const id = setInterval(load, 15000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [selectedBot, pair]);
+      setStatus('Sign builder fee approval in your wallet (2/2)...');
+      const builderAction = {
+        type: 'approveBuilderFee',
+        hyperliquidChain: 'Mainnet',
+        signatureChainId: '0xa4b1',
+        maxFeeRate: MAX_FEE_RATE,
+        builder: BUILDER_ADDRESS,
+        nonce: builderNonce,
+      };
+      const builderSig = await signTypedDataAsync({
+        domain,
+        types: builderFeeTypes,
+        primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
+        message: {
+          hyperliquidChain: 'Mainnet',
+          maxFeeRate: MAX_FEE_RATE,
+          builder: BUILDER_ADDRESS as `0x${string}`,
+          nonce: BigInt(builderNonce),
+        },
+      });
+      setStatus('Registering builder fee...');
+      await submitToHyperliquid(builderAction, splitSignature(builderSig), builderNonce);
 
-  const botMeta: Record<Exclude<BotType, null>, { title: string; icon: React.ReactNode }> = {
-    Grid: {
-      title: 'Grid Bot',
-      icon: (
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-          <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="#2ee6c5" strokeWidth="1.7" />
-          <rect x="14" y="3" width="7" height="7" rx="1.5" stroke="#2ee6c5" strokeWidth="1.7" />
-          <rect x="3" y="14" width="7" height="7" rx="1.5" stroke="#2ee6c5" strokeWidth="1.7" />
-          <rect x="14" y="14" width="7" height="7" rx="1.5" stroke="#5ef0d4" strokeWidth="1.7" />
-        </svg>
-      ),
-    },
-    DCA: {
-      title: 'DCA Bot',
-      icon: (
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-          <path d="M4 18h16" stroke="#2ee6c5" strokeWidth="1.5" strokeLinecap="round" />
-          <path d="M6 18V14" stroke="#2ee6c5" strokeWidth="2.1" strokeLinecap="round" />
-          <path d="M10 18V11" stroke="#2ee6c5" strokeWidth="2.1" strokeLinecap="round" />
-          <path d="M14 18V8" stroke="#5ef0d4" strokeWidth="2.1" strokeLinecap="round" />
-          <path d="M18 18V5" stroke="#5ef0d4" strokeWidth="2.1" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    Combo: {
-      title: 'Combo Bot',
-      icon: (
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-          <circle cx="9" cy="12" r="5.2" stroke="#2ee6c5" strokeWidth="1.6" />
-          <circle cx="15" cy="12" r="5.2" stroke="#5ef0d4" strokeWidth="1.6" />
-        </svg>
-      ),
-    },
-    Quant: {
-      title: 'Quant Bot',
-      icon: (
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-          <path d="M3 17l5-6 4 3 5-8 4 4" stroke="#2ee6c5" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M3 20h18" stroke="#5ef0d4" strokeWidth="1.4" opacity="0.5" />
-        </svg>
-      ),
-    },
-  };
+      setStatus('Saving data...');
+      const res = await fetch('/api/activate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          main_wallet: address,
+          agent_address: agentAccount.address,
+          agent_private_key: agentPrivKey,
+        }),
+      });
 
-  const handleBotClick = (bot: BotType) => {
-    if (!bot) return;
-    setSelectedBot(bot);
-    setPair('ETH');
-    setPairOpen(false);
-    setInvestAmount('500');
-    setDirection('LONG');
-    setLeverage(2);
-    setMarginMode('cross');
-    setTradeMode('normal');
-    setRangeLow('');
-    setRangeHigh('');
-    setTaEnabled(true);
-    setOrderFlowEnabled(true);
-    setVolumesEnabled(false);
-  };
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save data');
 
-  const Toggle = ({
-    label,
-    active,
-    onClick,
-  }: {
-    label: string;
-    active: boolean;
-    onClick: () => void;
-  }) => (
-    <button
-      onClick={onClick}
-      style={{
-        flex: 1,
-        padding: '11px 10px',
-        borderRadius: 10,
-        border: active ? '1px solid rgba(46,230,197,0.45)' : '1px solid #30363d',
-        background: active ? 'rgba(46,230,197,0.1)' : 'rgba(13,17,23,0.6)',
-        color: active ? '#2ee6c5' : '#8b949e',
-        fontSize: '12.5px',
-        fontWeight: 600,
-        cursor: 'pointer',
-        transition: 'all 0.15s',
-        textAlign: 'center',
-      }}
-    >
-      {label}
-    </button>
-  );
-
-  const HelpTip = ({ text }: { text: string }) => (
-    <span
-      style={{
-        position: 'relative',
-        display: 'inline-flex',
-        alignItems: 'center',
-        marginLeft: 5,
-        cursor: 'help',
-      }}
-      onMouseEnter={(e) => {
-        const tip = e.currentTarget.querySelector('.hq-tip') as HTMLElement;
-        if (tip) {
-          tip.style.opacity = '1';
-          tip.style.visibility = 'visible';
-        }
-      }}
-      onMouseLeave={(e) => {
-        const tip = e.currentTarget.querySelector('.hq-tip') as HTMLElement;
-        if (tip) {
-          tip.style.opacity = '0';
-          tip.style.visibility = 'hidden';
-        }
-      }}
-    >
-      <span
-        style={{
-          width: 14,
-          height: 14,
-          borderRadius: '50%',
-          border: '1px solid #6e7681',
-          color: '#6e7681',
-          fontSize: 10,
-          fontWeight: 700,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          lineHeight: 1,
-        }}
-      >
-        ?
-      </span>
-      <span
-        className="hq-tip"
-        style={{
-          position: 'absolute',
-          left: '50%',
-          bottom: 'calc(100% + 8px)',
-          transform: 'translateX(-50%)',
-          width: 220,
-          padding: '10px 12px',
-          borderRadius: 10,
-          background: '#161b22',
-          border: '1px solid #30363d',
-          color: '#c9d1d9',
-          fontSize: 12,
-          fontWeight: 400,
-          lineHeight: 1.45,
-          textTransform: 'none',
-          letterSpacing: 'normal',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
-          opacity: 0,
-          visibility: 'hidden',
-          transition: 'opacity 0.15s, visibility 0.15s',
-          zIndex: 50,
-          pointerEvents: 'none',
-          textAlign: 'left',
-        }}
-      >
-        {text}
-      </span>
-    </span>
-  );
-
-  // Simple coin icons
-  const CoinIcon = ({ symbol, size = 18 }: { symbol: string; size?: number }) => {
-    if (symbol === 'ETH') {
-      return (
-        <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
-          <circle cx="16" cy="16" r="16" fill="#627EEA" />
-          <path d="M16.5 4v8.87l7.5 3.35L16.5 4z" fill="#fff" fillOpacity="0.6" />
-          <path d="M16.5 4L9 16.22l7.5-3.35V4z" fill="#fff" />
-          <path d="M16.5 21.97v6.03L24 17.62l-7.5 4.35z" fill="#fff" fillOpacity="0.6" />
-          <path d="M16.5 28v-6.03L9 17.62 16.5 28z" fill="#fff" />
-          <path d="M16.5 20.57l7.5-4.35-7.5-3.35v7.7z" fill="#fff" fillOpacity="0.2" />
-          <path d="M9 16.22l7.5 4.35v-7.7L9 16.22z" fill="#fff" fillOpacity="0.6" />
-        </svg>
-      );
+      setStatus('Activated successfully. You can return to Telegram.');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Something went wrong';
+      setStatus(`Error: ${message}`);
+    } finally {
+      setLoading(false);
     }
-    if (symbol === 'BTC') {
-      return (
-        <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
-          <circle cx="16" cy="16" r="16" fill="#F7931A" />
-          <path d="M22.5 14.2c.3-2-1.2-3.1-3.3-3.8l.7-2.7-1.6-.4-.7 2.6c-.4-.1-.9-.2-1.3-.3l.7-2.6-1.6-.4-.7 2.7c-.4-.1-.7-.2-1.1-.3l-2.3-.6-.4 1.8s1.2.3 1.2.3c.7.2.8.6.8 1l-.8 3.1c0 .1.1.1.1.2h-.1l-1.1 4.5c-.1.2-.3.5-.7.4 0 0-1.2-.3-1.2-.3l-.8 1.9 2.1.5c.4.1.8.2 1.2.3l-.7 2.8 1.6.4.7-2.7c.4.1.9.2 1.3.3l-.7 2.7 1.6.4.7-2.8c2.9.5 5 .3 5.9-2.3.8-2.1 0-3.3-1.6-4.1 1.1-.3 2-1 2.2-2.5zm-4 5.5c-.5 2.2-4.2 1-5.4.7l1-3.8c1.2.3 5 .9 4.4 3.1zm.6-5.5c-.5 2-3.6.9-4.6.7l.9-3.4c1 .2 4.2.7 3.7 2.7z" fill="#fff" />
-        </svg>
-      );
-    }
-    if (symbol === 'SOL') {
-      return (
-        <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
-          <circle cx="16" cy="16" r="16" fill="#000" />
-          <path d="M10.5 20.5l1.8-1.8h9.4l-1.8 1.8H10.5zM10.5 13.3l1.8-1.8h9.4l-1.8 1.8H10.5zM21.7 15.1l-1.8 1.8h-9.4l1.8-1.8h9.4z" fill="url(#solGrad)" />
-          <defs>
-            <linearGradient id="solGrad" x1="10" y1="12" x2="22" y2="21" gradientUnits="userSpaceOnUse">
-              <stop stopColor="#00FFA3" />
-              <stop offset="1" stopColor="#DC1FFF" />
-            </linearGradient>
-          </defs>
-        </svg>
-      );
-    }
-    // USDC
-    return (
-      <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
-        <circle cx="16" cy="16" r="16" fill="#2775CA" />
-        <path d="M20.5 18.3c0-1.4-0.8-2.5-3.5-3.1-1.9-.4-2.3-.9-2.3-1.6 0-.7.5-1.2 1.6-1.2 1 0 1.5.3 1.8 1.1.1.2.3.3.5.3h1.2c.3 0 .5-.3.4-.6-.3-1.3-1.3-2.2-2.8-2.5V9.3c0-.3-.2-.5-.5-.5h-1.1c-.3 0-.5.2-.5.5v1.1c-1.8.3-3 1.5-3 3.2 0 1.5.9 2.5 3.4 3.1 1.6.4 2.3.8 2.3 1.7 0 1-.9 1.4-2 1.4-1.3 0-1.9-.5-2.2-1.3-.1-.2-.3-.4-.5-.4h-1.3c-.3 0-.5.2-.5.5.2 1.5 1.3 2.6 3.3 2.9v1.2c0 .3.2.5.5.5h1.1c.3 0 .5-.2.5-.5v-1.1c1.9-.3 3.1-1.6 3.1-3.4z" fill="#fff" />
-        <path d="M13.2 25.3c-5.1-1.5-8-6.9-6.5-12 1.1-3.6 4.1-6 7.7-6.5.3 0 .5-.2.5-.5V5.1c0-.3-.2-.5-.5-.5-6.9.8-12 6.9-11.2 13.9.6 4.7 4.1 8.6 8.7 9.8.3.1.6-.1.6-.4v-1.2c0-.3-.1-.5-.3-.6-.7-.2-1.3-.4-1.8-.7zM20.3 4.6c-.3 0-.5.2-.5.5v1.2c0 .3.1.5.3.6 5.1 1.5 8 6.9 6.5 12-1.1 3.6-4.1 6-7.7 6.5-.3 0-.5.2-.5.5v1.2c0 .3.2.5.5.5 6.9-.8 12-6.9 11.2-13.9-.6-4.7-4.1-8.6-8.7-9.8-.3-.1-.6.1-.6.4-.1.1-.3.2-.5.3z" fill="#fff" />
-      </svg>
-    );
   };
-
-  const currentPair = PAIRS.find((p) => p.id === pair)!;
 
   return (
     <main
@@ -297,7 +165,7 @@ export default function Home() {
         alignItems: 'center',
         justifyContent: 'center',
         minHeight: '100vh',
-        padding: '20px 14px',
+        padding: '24px 16px',
         boxSizing: 'border-box',
         background:
           'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(46, 230, 197, 0.12), transparent), #0b0e14',
@@ -320,13 +188,12 @@ export default function Home() {
           background: 'linear-gradient(165deg, #161b22 0%, #0f1318 100%)',
           border: '1px solid rgba(48, 54, 61, 0.9)',
           borderRadius: '20px',
-          padding: '32px 20px 24px',
-          maxWidth: selectedBot ? '480px' : '620px',
+          padding: '40px 28px 36px',
+          maxWidth: '420px',
           width: '100%',
           textAlign: 'center',
           boxShadow:
             '0 0 0 1px rgba(46, 230, 197, 0.04), 0 20px 50px rgba(0, 0, 0, 0.45), 0 0 80px rgba(46, 230, 197, 0.04)',
-          transition: 'max-width 0.3s ease',
         }}
       >
         <div
@@ -344,549 +211,238 @@ export default function Home() {
           }}
         />
 
-        {!selectedBot && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '14px' }}>
-              <div
-                style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 13,
-                  overflow: 'hidden',
-                  border: '1px solid rgba(46, 230, 197, 0.35)',
-                  boxShadow: '0 0 18px rgba(46, 230, 197, 0.15)',
-                  background: '#05080c',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <img src="/iconhq.png" alt="Hyper Quant" width={44} height={44} style={{ display: 'block', objectFit: 'contain' }} />
-              </div>
-            </div>
-
-            <h1
-              style={{
-                fontSize: '22px',
-                fontWeight: 700,
-                margin: '0 0 4px',
-                letterSpacing: '-0.02em',
-                background: 'linear-gradient(90deg, #2ee6c5 0%, #5ef0d4 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-              }}
-            >
-              HYPER QUANT
-            </h1>
-
-            <p style={{ color: '#e6edf3', fontSize: '17px', fontWeight: 600, margin: '0 0 20px', letterSpacing: '-0.01em' }}>
-              Create Bot
-            </p>
-          </>
-        )}
-
-        {!selectedBot && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
           <div
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))',
-              gap: '11px',
-              marginBottom: '6px',
+              width: 64,
+              height: 64,
+              borderRadius: 16,
+              overflow: 'hidden',
+              border: '1px solid rgba(46, 230, 197, 0.35)',
+              boxShadow: '0 0 24px rgba(46, 230, 197, 0.18), inset 0 0 0 1px rgba(46, 230, 197, 0.08)',
+              background: '#05080c',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            {(
-              [
-                { id: 'Grid' as BotType, title: 'Grid', points: ['Extract profit from volatility', 'Market making', 'Trailing for every grid'] },
-                { id: 'DCA' as BotType, title: 'DCA', points: ['Use averaging', 'Take profit on any market', 'Technical + Order Flow'] },
-                { id: 'Combo' as BotType, title: 'Combo', points: ['Combined strategy', 'Grid stability', 'DCA reliability'] },
-                { id: 'Quant' as BotType, title: 'Quant', points: ['3 trading systems', 'Order Flow + TA', 'Pump/dump protection'] },
-              ] as const
-            ).map((bot) => (
-              <div
-                key={bot.id}
-                onClick={() => handleBotClick(bot.id)}
-                style={{
-                  background: 'rgba(13, 17, 23, 0.7)',
-                  border: '1px solid rgba(48, 54, 61, 0.9)',
-                  borderRadius: '13px',
-                  padding: '14px 11px 12px',
-                  cursor: 'pointer',
-                  transition: 'border-color 0.2s, box-shadow 0.2s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.5)';
-                  e.currentTarget.style.boxShadow = '0 0 16px rgba(46, 230, 197, 0.1)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(48, 54, 61, 0.9)';
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
-              >
-                <div
-                  style={{
-                    width: 48,
-                    height: 48,
-                    margin: '0 auto 9px',
-                    borderRadius: 11,
-                    background: 'rgba(46, 230, 197, 0.08)',
-                    border: '1px solid rgba(46, 230, 197, 0.25)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  {botMeta[bot.id!].icon}
-                </div>
-                <div style={{ fontWeight: 700, fontSize: '13.5px', color: '#e6edf3', marginBottom: '5px' }}>{bot.title}</div>
-                <ul style={{ margin: 0, padding: 0, listStyle: 'none', fontSize: '10.5px', lineHeight: 1.4, color: '#8b949e', textAlign: 'left' }}>
-                  {bot.points.map((p) => (
-                    <li key={p} style={{ marginBottom: 2 }}>• {p}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+            <img
+              src="/iconhq.png"
+              alt="Hyper Quant"
+              width={56}
+              height={56}
+              style={{ display: 'block', objectFit: 'contain' }}
+            />
+          </div>
+        </div>
 
-            <div
+        <h1
+          style={{
+            fontSize: '26px',
+            fontWeight: 700,
+            margin: '0 0 8px',
+            letterSpacing: '-0.02em',
+            background: 'linear-gradient(90deg, #2ee6c5 0%, #5ef0d4 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+          }}
+        >
+          HYPER QUANT
+        </h1>
+        <p
+          style={{
+            color: '#8b949e',
+            fontSize: '14px',
+            lineHeight: 1.5,
+            margin: '0 0 28px',
+          }}
+        >
+          Algorithmic Trading System
+        </p>
+
+        <div style={{ textAlign: 'left', marginBottom: '18px' }}>
+          <label
+            htmlFor="telegram-id"
+            style={{
+              display: 'block',
+              fontSize: '12px',
+              fontWeight: 600,
+              color: '#8b949e',
+              marginBottom: '8px',
+              letterSpacing: '0.02em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Telegram ID
+          </label>
+          <div style={{ position: 'relative' }}>
+            <span
+              aria-hidden
               style={{
-                background: 'rgba(13, 17, 23, 0.4)',
-                border: '1px solid rgba(48, 54, 61, 0.5)',
-                borderRadius: '13px',
-                padding: '14px 11px 12px',
-                opacity: 0.68,
-                cursor: 'not-allowed',
-                gridColumn: '1 / -1',
+                position: 'absolute',
+                left: '14px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                display: 'flex',
+                alignItems: 'center',
+                color: '#6e7681',
               }}
             >
-              <div
-                style={{
-                  width: 48,
-                  height: 48,
-                  margin: '0 auto 9px',
-                  borderRadius: 11,
-                  background: 'rgba(110, 118, 129, 0.12)',
-                  border: '1px solid rgba(110, 118, 129, 0.25)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="3" stroke="#6e7681" strokeWidth="1.5" />
-                  <path d="M12 2v2.5M12 19.5V22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M2 12h2.5M19.5 12H22M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" stroke="#6e7681" strokeWidth="1.3" strokeLinecap="round" />
-                </svg>
-              </div>
-              <div style={{ fontWeight: 700, fontSize: '13.5px', color: '#8b949e', marginBottom: '5px' }}>Custom Bot</div>
-              <div style={{ fontSize: '11.5px', fontWeight: 600, color: '#e3b341', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                In Development
-              </div>
-            </div>
-          </div>
-        )}
-
-        {selectedBot && (
-          <div style={{ width: '100%', textAlign: 'left' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '22px' }}>
-              <div
-                style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 13,
-                  background: 'rgba(46, 230, 197, 0.08)',
-                  border: '1px solid rgba(46, 230, 197, 0.3)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                {botMeta[selectedBot].icon}
-              </div>
-              <div>
-                <div style={{ fontSize: '11px', color: '#8b949e', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: 2 }}>
-                  Create Bot
-                </div>
-                <div style={{ fontSize: '18px', fontWeight: 700, color: '#e6edf3' }}>
-                  {botMeta[selectedBot].title}
-                </div>
-              </div>
-            </div>
-
-            {/* Pair selector */}
-            <div style={{ marginBottom: '18px', position: 'relative' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
-                Pair
-              </label>
-              <button
-                type="button"
-                onClick={() => setPairOpen((v) => !v)}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '12px 14px',
-                  borderRadius: 10,
-                  border: pairOpen ? '1px solid rgba(46,230,197,0.45)' : '1px solid #30363d',
-                  background: '#0d1117',
-                  color: '#e6edf3',
-                  fontSize: 15,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  boxSizing: 'border-box',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <div style={{ zIndex: 1 }}><CoinIcon symbol={currentPair.base} size={22} /></div>
-                  <div style={{ marginLeft: -6, zIndex: 0 }}><CoinIcon symbol={currentPair.quote} size={22} /></div>
-                </div>
-                <span style={{ flex: 1, textAlign: 'left' }}>{currentPair.label}</span>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ opacity: 0.6, transform: pairOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
-                  <path d="M6 9l6 6 6-6" stroke="#8b949e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-
-              {pairOpen && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: 0,
-                    right: 0,
-                    top: 'calc(100% + 6px)',
-                    background: '#161b22',
-                    border: '1px solid #30363d',
-                    borderRadius: 12,
-                    overflow: 'hidden',
-                    zIndex: 30,
-                    boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
-                  }}
-                >
-                  {PAIRS.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        setPair(p.id);
-                        setPairOpen(false);
-                      }}
-                      style={{
-                        width: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 10,
-                        padding: '12px 14px',
-                        border: 'none',
-                        background: pair === p.id ? 'rgba(46,230,197,0.08)' : 'transparent',
-                        color: '#e6edf3',
-                        fontSize: 14,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center' }}>
-                        <div style={{ zIndex: 1 }}><CoinIcon symbol={p.base} size={20} /></div>
-                        <div style={{ marginLeft: -5, zIndex: 0 }}><CoinIcon symbol={p.quote} size={20} /></div>
-                      </div>
-                      {p.label}
-                      {pair === p.id && (
-                        <span style={{ marginLeft: 'auto', color: '#2ee6c5', fontSize: 12 }}>✓</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Investment */}
-            <div style={{ marginBottom: '18px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
-                Investment
-              </label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={investAmount}
-                  onChange={(e) => setInvestAmount(e.target.value.replace(/[^0-9.]/g, ''))}
-                  style={{
-                    width: '100%',
-                    boxSizing: 'border-box',
-                    padding: '12px 60px 12px 14px',
-                    borderRadius: 10,
-                    border: '1px solid #30363d',
-                    background: '#0d1117',
-                    color: '#e6edf3',
-                    fontSize: 15,
-                    outline: 'none',
-                  }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(46,230,197,0.45)';
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = '#30363d';
-                  }}
-                />
-                <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: '#6e7681', fontSize: 13, fontWeight: 600 }}>
-                  USDC
-                </span>
-              </div>
-              <div style={{ marginTop: 6, fontSize: 12, color: '#6e7681' }}>
-                Balance: <span style={{ color: '#2ee6c5' }}>{balance} USDC</span>
-              </div>
-            </div>
-
-            {/* Direction */}
-            <div style={{ marginBottom: '18px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
-                Direction
-              </label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  onClick={() => setDirection('LONG')}
-                  style={{
-                    flex: 1,
-                    padding: '11px',
-                    borderRadius: 10,
-                    border: direction === 'LONG' ? '1px solid rgba(63,185,80,0.5)' : '1px solid #30363d',
-                    background: direction === 'LONG' ? 'rgba(63,185,80,0.12)' : 'rgba(13,17,23,0.6)',
-                    color: direction === 'LONG' ? '#3fb950' : '#8b949e',
-                    fontWeight: 700,
-                    fontSize: 14,
-                    cursor: 'pointer',
-                  }}
-                >
-                  LONG
-                </button>
-                <button
-                  disabled
-                  style={{
-                    flex: 1,
-                    padding: '11px',
-                    borderRadius: 10,
-                    border: '1px solid #30363d',
-                    background: 'rgba(13,17,23,0.4)',
-                    color: '#484f58',
-                    fontWeight: 700,
-                    fontSize: 14,
-                    cursor: 'not-allowed',
-                  }}
-                >
-                  SHORT
-                  <div style={{ fontSize: 10, fontWeight: 500, marginTop: 2, color: '#6e7681' }}>Unavailable</div>
-                </button>
-              </div>
-            </div>
-
-            {/* Leverage */}
-            <div style={{ marginBottom: '18px' }}>
-              <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '10px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
-                <span>Leverage · max 3×</span>
-                <span style={{ color: '#2ee6c5', fontSize: 15, fontWeight: 700 }}>{leverage}×</span>
-              </label>
-              <input
-                type="range"
-                min={1}
-                max={3}
-                step={1}
-                value={leverage}
-                onChange={(e) => setLeverage(Number(e.target.value))}
-                style={{
-                  width: '100%',
-                  height: 6,
-                  borderRadius: 4,
-                  appearance: 'none',
-                  background: `linear-gradient(to right, #2ee6c5 0%, #2ee6c5 ${((leverage - 1) / 2) * 100}%, #30363d ${((leverage - 1) / 2) * 100}%, #30363d 100%)`,
-                  outline: 'none',
-                  cursor: 'pointer',
-                }}
-              />
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11, color: '#6e7681' }}>
-                <span>1×</span>
-                <span>2×</span>
-                <span>3×</span>
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <button
-                  onClick={() => setMarginMode('cross')}
-                  style={{
-                    flex: 1,
-                    padding: '10px',
-                    borderRadius: 10,
-                    border: marginMode === 'cross' ? '1px solid rgba(46,230,197,0.5)' : '1px solid #30363d',
-                    background: marginMode === 'cross' ? 'rgba(46,230,197,0.12)' : 'rgba(13,17,23,0.6)',
-                    color: marginMode === 'cross' ? '#2ee6c5' : '#8b949e',
-                    fontWeight: 600,
-                    fontSize: 13,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Cross
-                </button>
-                <button
-                  onClick={() => setMarginMode('isolated')}
-                  style={{
-                    flex: 1,
-                    padding: '10px',
-                    borderRadius: 10,
-                    border: marginMode === 'isolated' ? '1px solid rgba(46,230,197,0.5)' : '1px solid #30363d',
-                    background: marginMode === 'isolated' ? 'rgba(46,230,197,0.12)' : 'rgba(13,17,23,0.6)',
-                    color: marginMode === 'isolated' ? '#2ee6c5' : '#8b949e',
-                    fontWeight: 600,
-                    fontSize: 13,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Isolated
-                </button>
-              </div>
-            </div>
-
-            {/* Mode */}
-            <div style={{ marginBottom: '18px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
-                Mode
-                <HelpTip text="Affects risk level, averaging, stop-losses and sensitivity to entry filters." />
-              </label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {(
-                  [
-                    { id: 'positional' as TradeMode, title: 'Positional', note: '1D timeframe' },
-                    { id: 'normal' as TradeMode, title: 'Normal', note: '1H / 4H' },
-                    { id: 'aggressive' as TradeMode, title: 'Aggressive', note: 'Scalping mode' },
-                  ] as const
-                ).map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => setTradeMode(m.id)}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      padding: '12px 14px',
-                      borderRadius: 10,
-                      border: tradeMode === m.id ? '1px solid rgba(46,230,197,0.5)' : '1px solid #30363d',
-                      background: tradeMode === m.id ? 'rgba(46,230,197,0.1)' : 'rgba(13,17,23,0.6)',
-                      color: tradeMode === m.id ? '#e6edf3' : '#8b949e',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                    }}
-                  >
-                    <span style={{ fontWeight: 600, fontSize: 14 }}>{m.title}</span>
-                    <span style={{ fontSize: 12, color: tradeMode === m.id ? '#2ee6c5' : '#6e7681' }}>{m.note}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Trading Range + live price */}
-            <div style={{ marginBottom: '18px' }}>
-              <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
-                <span>Trading Range</span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#2ee6c5', letterSpacing: 'normal', textTransform: 'none' }}>
-                  {currentPair.base} · ${livePrice ?? '…'}
-                </span>
-              </label>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="Low"
-                  value={rangeLow}
-                  onChange={(e) => setRangeLow(e.target.value.replace(/[^0-9.]/g, ''))}
-                  style={{
-                    flex: 1,
-                    padding: '11px 12px',
-                    borderRadius: 10,
-                    border: '1px solid #30363d',
-                    background: '#0d1117',
-                    color: '#e6edf3',
-                    fontSize: 14,
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                  }}
-                />
-                <span style={{ color: '#6e7681', fontSize: 13 }}>–</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="High"
-                  value={rangeHigh}
-                  onChange={(e) => setRangeHigh(e.target.value.replace(/[^0-9.]/g, ''))}
-                  style={{
-                    flex: 1,
-                    padding: '11px 12px',
-                    borderRadius: 10,
-                    border: '1px solid #30363d',
-                    background: '#0d1117',
-                    color: '#e6edf3',
-                    fontSize: 14,
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Modules */}
-            <div style={{ marginBottom: '22px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', fontSize: '12px', fontWeight: 600, color: '#8b949e', marginBottom: '8px', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
-                Modules
-                <HelpTip text="Filtering and decision-making systems with different trading approaches. Recommended to enable all of them." />
-              </label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Toggle label="Technical Analysis" active={taEnabled} onClick={() => setTaEnabled((v) => !v)} />
-                  <Toggle label="Order Flow" active={orderFlowEnabled} onClick={() => setOrderFlowEnabled((v) => !v)} />
-                </div>
-                <Toggle label="Volumes & Liquidations" active={volumesEnabled} onClick={() => setVolumesEnabled((v) => !v)} />
-              </div>
-            </div>
-
-            <button
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+              </svg>
+            </span>
+            <input
+              id="telegram-id"
+              type="text"
+              inputMode="text"
+              autoComplete="off"
+              placeholder="Enter your @Nickname from the Telegram"
+              value={telegramId}
+              onChange={(e) => setTelegramId(e.target.value.replace(/[^a-zA-Z0-9_@]/g, ''))}
               style={{
                 width: '100%',
-                padding: '14px',
-                borderRadius: 10,
+                boxSizing: 'border-box',
+                padding: '12px 14px 12px 40px',
+                borderRadius: '10px',
+                border: '1px solid #30363d',
+                background: '#0d1117',
+                color: '#e6edf3',
+                fontSize: '15px',
+                outline: 'none',
+                transition: 'border-color 0.15s, box-shadow 0.15s',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
+                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(46, 230, 197, 0.1)';
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = '#30363d';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            />
+          </div>
+          <p
+            style={{
+              margin: '8px 0 0',
+              fontSize: '12px',
+              color: '#8b949e',
+              lineHeight: 1.5,
+            }}
+          >
+            <span style={{ color: '#e3b341', fontWeight: 600 }}>Note:</span>{' '}
+            Enter your Telegram @Nickname if you have an active paid subscription.
+            Leave this field empty on the free plan — a builder fee of{' '}
+            <span style={{ color: '#2ee6c5' }}>0.01%</span> will apply
+            (up to <span style={{ color: '#2ee6c5' }}>0.03%</span> for our MVP Quant Bot).
+          </p>
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            marginBottom: '8px',
+          }}
+        >
+          <ConnectButton
+            label="Connect wallet"
+            showBalance={false}
+            accountStatus="address"
+          />
+        </div>
+
+        {isConnected && (
+          <div style={{ marginTop: '20px' }}>
+            <button
+              onClick={handleApproveAndActivate}
+              disabled={loading}
+              style={{
+                width: '100%',
+                padding: '14px 16px',
+                borderRadius: '10px',
                 border: 'none',
-                background: 'linear-gradient(90deg, #2ee6c5 0%, #5ef0d4 100%)',
-                color: '#0b0e14',
+                background: loading
+                  ? '#30363d'
+                  : 'linear-gradient(90deg, #2ee6c5 0%, #5ef0d4 100%)',
+                color: loading ? '#8b949e' : '#0b0e14',
                 fontWeight: 700,
-                fontSize: 15,
-                cursor: 'pointer',
-                boxShadow: '0 4px 20px rgba(46, 230, 197, 0.25)',
+                fontSize: '15px',
+                letterSpacing: '0.01em',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                transition: 'opacity 0.2s, transform 0.15s',
+                boxShadow: loading
+                  ? 'none'
+                  : '0 4px 20px rgba(46, 230, 197, 0.25)',
+              }}
+              onMouseEnter={(e) => {
+                if (!loading) e.currentTarget.style.opacity = '0.92';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.opacity = '1';
               }}
             >
-              Create {botMeta[selectedBot].title}
+              {loading ? 'Processing...' : 'Activate Hyper Quant'}
             </button>
 
-            <button
-              onClick={() => {
-                setSelectedBot(null);
-                setPairOpen(false);
-              }}
-              style={{
-                marginTop: 12,
-                width: '100%',
-                padding: '11px',
-                borderRadius: 10,
-                border: '1px solid rgba(46, 230, 197, 0.25)',
-                background: 'transparent',
-                color: '#2ee6c5',
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              ← Back to bots
-            </button>
+            {status && (
+              <p
+                style={{
+                  marginTop: '16px',
+                  marginBottom: 0,
+                  fontSize: '13px',
+                  lineHeight: 1.45,
+                  color: status.startsWith('Error') ? '#ff7b72' : '#7ee787',
+                }}
+              >
+                {status}
+              </p>
+            )}
           </div>
         )}
+
+        <a
+          href={TELEGRAM_BOT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '10px',
+            marginTop: '22px',
+            width: '100%',
+            boxSizing: 'border-box',
+            padding: '12px 16px',
+            borderRadius: '10px',
+            border: '1px solid rgba(46, 230, 197, 0.35)',
+            background: 'rgba(46, 230, 197, 0.06)',
+            color: '#2ee6c5',
+            fontWeight: 600,
+            fontSize: '14px',
+            textDecoration: 'none',
+            transition: 'background 0.15s, border-color 0.15s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(46, 230, 197, 0.12)';
+            e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.55)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'rgba(46, 230, 197, 0.06)';
+            e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.35)';
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+          </svg>
+          Open Telegram Bot
+        </a>
 
         <div
           style={{
             marginTop: '20px',
-            paddingTop: '14px',
+            paddingTop: '18px',
             borderTop: '1px solid #21262d',
             display: 'flex',
             alignItems: 'center',
@@ -898,26 +454,6 @@ export default function Home() {
             @keyframes hqPulse {
               0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(63, 185, 80, 0.7); transform: scale(1); }
               50% { opacity: 0.35; box-shadow: 0 0 2px rgba(63, 185, 80, 0.25); transform: scale(0.85); }
-            }
-            input[type=range]::-webkit-slider-thumb {
-              -webkit-appearance: none;
-              appearance: none;
-              width: 18px;
-              height: 18px;
-              border-radius: 50%;
-              background: #2ee6c5;
-              cursor: pointer;
-              border: 2px solid #0b0e14;
-              box-shadow: 0 0 8px rgba(46, 230, 197, 0.45);
-            }
-            input[type=range]::-moz-range-thumb {
-              width: 18px;
-              height: 18px;
-              border-radius: 50%;
-              background: #2ee6c5;
-              cursor: pointer;
-              border: 2px solid #0b0e14;
-              box-shadow: 0 0 8px rgba(46, 230, 197, 0.45);
             }
           `}</style>
           <span
