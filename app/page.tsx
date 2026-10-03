@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useSignTypedData } from 'wagmi';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
@@ -8,14 +8,12 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 // --- SETTINGS ---
 const BUILDER_ADDRESS = '0x8E5B541b59C43cCD688215C1c52CB6E4B885D5e9';
 const MAX_FEE_RATE = '0.03%';
-const HYPERLIQUID_API = 'https://api.hyperliquid.xyz/exchange';
-// Change this to your bot username if different
+const HYPERLIQUID_EXCHANGE = 'https://api.hyperliquid.xyz/exchange';
+const HYPERLIQUID_INFO = 'https://api.hyperliquid.xyz/info';
 const TELEGRAM_BOT_URL = 'https://t.me/hyperquant_trade_bot';
+const AGENT_NAME = 'HyperQuant';
+const MIN_BALANCE_USD = 50;
 
-// IMPORTANT: when signing through a real browser wallet (MetaMask/WalletConnect via
-// wagmi), domain.chainId MUST match the network the wallet is actually connected to
-// (Arbitrum One = 42161), otherwise the wallet itself rejects the request with
-// "Invalid parameters were provided to the RPC method" before it ever reaches Hyperliquid.
 const domain = {
   name: 'HyperliquidSignTransaction',
   version: '1',
@@ -41,15 +39,6 @@ const builderFeeTypes = {
   ],
 } as const;
 
-const abstractionTypes = {
-  'HyperliquidTransaction:UserSetAbstraction': [
-    { name: 'hyperliquidChain', type: 'string' },
-    { name: 'user', type: 'address' },
-    { name: 'abstraction', type: 'string' },
-    { name: 'nonce', type: 'uint64' },
-  ],
-} as const;
-
 function splitSignature(signature: `0x${string}`) {
   return {
     r: signature.slice(0, 66) as `0x${string}`,
@@ -63,7 +52,7 @@ async function submitToHyperliquid(
   signature: { r: string; s: string; v: number },
   nonce: number
 ) {
-  const res = await fetch(HYPERLIQUID_API, {
+  const res = await fetch(HYPERLIQUID_EXCHANGE, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, nonce, signature }),
@@ -77,6 +66,47 @@ async function submitToHyperliquid(
   return data;
 }
 
+async function hlInfo<T>(body: Record<string, unknown>): Promise<T> {
+  const res = await fetch(HYPERLIQUID_INFO, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Info API HTTP ${res.status}`);
+  return res.json() as Promise<T>;
+}
+
+type AccountInfo = {
+  balance: number | null;
+  agent: { name: string; address: string } | null;
+  accountType: string | null;
+  loading: boolean;
+  error: string | null;
+};
+
+function CheckIcon({ ok }: { ok: boolean }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 18,
+        height: 18,
+        borderRadius: 4,
+        fontSize: 12,
+        fontWeight: 700,
+        flexShrink: 0,
+        background: ok ? 'rgba(63, 185, 80, 0.15)' : 'rgba(248, 81, 73, 0.15)',
+        color: ok ? '#3fb950' : '#f85149',
+      }}
+      aria-hidden
+    >
+      {ok ? '✓' : '✗'}
+    </span>
+  );
+}
+
 export default function Home() {
   const { address, isConnected } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
@@ -84,11 +114,93 @@ export default function Home() {
   const [telegramId, setTelegramId] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [accountInfo, setAccountInfo] = useState<AccountInfo>({
+    balance: null,
+    agent: null,
+    accountType: null,
+    loading: false,
+    error: null,
+  });
+
+  const fetchAccountInfo = useCallback(async (userAddress: string) => {
+    setAccountInfo((prev) => ({ ...prev, loading: true, error: null }));
+    try {
+      const [clearing, agents, role] = await Promise.all([
+        hlInfo<{
+          marginSummary?: { accountValue?: string };
+          withdrawable?: string;
+        }>({ type: 'clearinghouseState', user: userAddress }),
+        hlInfo<Array<{ name: string; address: string; validUntil: number | null }>>({
+          type: 'extraAgents',
+          user: userAddress,
+        }),
+        hlInfo<{ role: string; data?: { user?: string; master?: string } }>({
+          type: 'userRole',
+          user: userAddress,
+        }),
+      ]);
+
+      const rawValue =
+        clearing?.marginSummary?.accountValue ?? clearing?.withdrawable ?? '0';
+      const balance = parseFloat(rawValue) || 0;
+
+      const hqAgent =
+        Array.isArray(agents) && agents.length > 0
+          ? agents.find((a) => a.name === AGENT_NAME) ?? agents[0]
+          : null;
+
+      let accountType = role?.role ?? 'unknown';
+      if (accountType === 'subAccount' && role?.data?.master) {
+        accountType = `subAccount (master: ${role.data.master.slice(0, 6)}…${role.data.master.slice(-4)})`;
+      } else if (accountType === 'agent' && role?.data?.user) {
+        accountType = `agent (of: ${role.data.user.slice(0, 6)}…${role.data.user.slice(-4)})`;
+      }
+
+      setAccountInfo({
+        balance,
+        agent: hqAgent
+          ? { name: hqAgent.name || AGENT_NAME, address: hqAgent.address }
+          : null,
+        accountType,
+        loading: false,
+        error: null,
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to load account data';
+      setAccountInfo({
+        balance: null,
+        agent: null,
+        accountType: null,
+        loading: false,
+        error: `Error#201 — Could not load account info from Hyperliquid: ${msg}`,
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isConnected && address) {
+      fetchAccountInfo(address);
+    } else {
+      setAccountInfo({
+        balance: null,
+        agent: null,
+        accountType: null,
+        loading: false,
+        error: null,
+      });
+    }
+  }, [isConnected, address, fetchAccountInfo]);
 
   const handleApproveAndActivate = async () => {
-    if (!address) return;
+    if (!address) {
+      setStatus('Error#101 — Wallet is not connected. Connect your wallet first.');
+      return;
+    }
     setLoading(true);
     setStatus('Generating trading agent...');
+
+    let stage: 'agent_sign' | 'agent_submit' | 'builder_sign' | 'builder_submit' | 'save' =
+      'agent_sign';
 
     try {
       const agentPrivKey = generatePrivateKey();
@@ -96,34 +208,66 @@ export default function Home() {
 
       const agentNonce = Date.now();
       const builderNonce = agentNonce + 1;
-      const abstractionNonce = agentNonce + 2;
 
-      // ——— 1/3 Approve Agent ———
-      setStatus('Sign agent approval in your wallet (1/3)...');
+      // --- Stage 1: Approve Agent signature ---
+      stage = 'agent_sign';
+      setStatus('Sign agent approval in your wallet (1/2)...');
       const agentAction = {
         type: 'approveAgent',
         hyperliquidChain: 'Mainnet',
         signatureChainId: '0xa4b1',
         agentAddress: agentAccount.address,
-        agentName: 'HyperQuant',
+        agentName: AGENT_NAME,
         nonce: agentNonce,
       };
-      const agentSig = await signTypedDataAsync({
-        domain,
-        types: agentTypes,
-        primaryType: 'HyperliquidTransaction:ApproveAgent',
-        message: {
-          hyperliquidChain: 'Mainnet',
-          agentAddress: agentAccount.address as `0x${string}`,
-          agentName: 'HyperQuant',
-          nonce: BigInt(agentNonce),
-        },
-      });
-      setStatus('Registering agent on Hyperliquid...');
-      await submitToHyperliquid(agentAction, splitSignature(agentSig), agentNonce);
 
-      // ——— 2/3 Approve Builder Fee ———
-      setStatus('Sign builder fee approval in your wallet (2/3)...');
+      let agentSig: `0x${string}`;
+      try {
+        agentSig = await signTypedDataAsync({
+          domain,
+          types: agentTypes,
+          primaryType: 'HyperliquidTransaction:ApproveAgent',
+          message: {
+            hyperliquidChain: 'Mainnet',
+            agentAddress: agentAccount.address as `0x${string}`,
+            agentName: AGENT_NAME,
+            nonce: BigInt(agentNonce),
+          },
+        });
+      } catch (signErr: unknown) {
+        const m = signErr instanceof Error ? signErr.message : String(signErr);
+        if (/reject|denied|cancel|user rejected/i.test(m)) {
+          throw Object.assign(
+            new Error(
+              'Error#102 — Agent approval signature was canceled or rejected in the wallet. You skipped the agent authorization step.'
+            ),
+            { code: 102 }
+          );
+        }
+        throw Object.assign(
+          new Error(`Error#102 — Failed to get agent signature: ${m}`),
+          { code: 102 }
+        );
+      }
+
+      // --- Stage 2: Submit agent ---
+      stage = 'agent_submit';
+      setStatus('Registering agent on Hyperliquid...');
+      try {
+        await submitToHyperliquid(agentAction, splitSignature(agentSig), agentNonce);
+      } catch (apiErr: unknown) {
+        const m = apiErr instanceof Error ? apiErr.message : String(apiErr);
+        throw Object.assign(
+          new Error(
+            `Error#104 — Hyperliquid rejected agent registration. Details: ${m}`
+          ),
+          { code: 104 }
+        );
+      }
+
+      // --- Stage 3: Builder fee signature ---
+      stage = 'builder_sign';
+      setStatus('Sign builder fee approval in your wallet (2/2)...');
       const builderAction = {
         type: 'approveBuilderFee',
         hyperliquidChain: 'Mainnet',
@@ -132,49 +276,53 @@ export default function Home() {
         builder: BUILDER_ADDRESS,
         nonce: builderNonce,
       };
-      const builderSig = await signTypedDataAsync({
-        domain,
-        types: builderFeeTypes,
-        primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
-        message: {
-          hyperliquidChain: 'Mainnet',
-          maxFeeRate: MAX_FEE_RATE,
-          builder: BUILDER_ADDRESS as `0x${string}`,
-          nonce: BigInt(builderNonce),
-        },
-      });
+
+      let builderSig: `0x${string}`;
+      try {
+        builderSig = await signTypedDataAsync({
+          domain,
+          types: builderFeeTypes,
+          primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
+          message: {
+            hyperliquidChain: 'Mainnet',
+            maxFeeRate: MAX_FEE_RATE,
+            builder: BUILDER_ADDRESS as `0x${string}`,
+            nonce: BigInt(builderNonce),
+          },
+        });
+      } catch (signErr: unknown) {
+        const m = signErr instanceof Error ? signErr.message : String(signErr);
+        if (/reject|denied|cancel|user rejected/i.test(m)) {
+          throw Object.assign(
+            new Error(
+              'Error#103 — Builder fee signature was canceled or rejected. Agent was registered, but fee approval was skipped. Re-run activation to complete.'
+            ),
+            { code: 103 }
+          );
+        }
+        throw Object.assign(
+          new Error(`Error#103 — Failed to get builder fee signature: ${m}`),
+          { code: 103 }
+        );
+      }
+
+      // --- Stage 4: Submit builder fee ---
+      stage = 'builder_submit';
       setStatus('Registering builder fee...');
-      await submitToHyperliquid(builderAction, splitSignature(builderSig), builderNonce);
+      try {
+        await submitToHyperliquid(builderAction, splitSignature(builderSig), builderNonce);
+      } catch (apiErr: unknown) {
+        const m = apiErr instanceof Error ? apiErr.message : String(apiErr);
+        throw Object.assign(
+          new Error(
+            `Error#105 — Hyperliquid rejected builder fee registration. Details: ${m}`
+          ),
+          { code: 105 }
+        );
+      }
 
-      // ——— 3/3 Unified Account (обязательный шаг) ———
-      setStatus('Sign unified account mode in your wallet (3/3)...');
-      const abstractionAction = {
-        type: 'userSetAbstraction',
-        hyperliquidChain: 'Mainnet',
-        signatureChainId: '0xa4b1',
-        user: address,
-        abstraction: 'unifiedAccount',
-        nonce: abstractionNonce,
-      };
-      const abstractionSig = await signTypedDataAsync({
-        domain,
-        types: abstractionTypes,
-        primaryType: 'HyperliquidTransaction:UserSetAbstraction',
-        message: {
-          hyperliquidChain: 'Mainnet',
-          user: address as `0x${string}`,
-          abstraction: 'unifiedAccount',
-          nonce: BigInt(abstractionNonce),
-        },
-      });
-      setStatus('Enabling unified account (shared spot + futures balance)...');
-      await submitToHyperliquid(
-        abstractionAction,
-        splitSignature(abstractionSig),
-        abstractionNonce
-      );
-
-      // Данные на сервер отправляются ТОЛЬКО после всех трёх подписей
+      // --- Stage 5: Save to backend ---
+      stage = 'save';
       setStatus('Saving data...');
       const res = await fetch('/api/activate', {
         method: 'POST',
@@ -183,31 +331,53 @@ export default function Home() {
           main_wallet: address,
           agent_address: agentAccount.address,
           agent_private_key: agentPrivKey,
+          telegram_id: telegramId || undefined,
         }),
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to save data');
+      if (!res.ok) {
+        throw Object.assign(
+          new Error(
+            `Error#106 — Failed to save activation data on server: ${data.error || 'Unknown server error'}`
+          ),
+          { code: 106 }
+        );
+      }
 
       setStatus('Activated successfully. You can return to Telegram.');
+      // Refresh account panel
+      if (address) fetchAccountInfo(address);
     } catch (e: unknown) {
-      const raw = e instanceof Error ? e.message : 'Something went wrong';
-      const isUserReject =
-        /user rejected|user denied|rejected the request|denied transaction|action_rejected/i.test(
-          raw
-        );
-
-      if (isUserReject) {
-        setStatus(
-          'Error: All 3 signatures are required. Unified Account mode (shared spot + futures balance) is mandatory — without it the bot cannot trade reliably. Please try again and approve all prompts.'
-        );
+      const message = e instanceof Error ? e.message : 'Something went wrong';
+      // If already has Error# — keep it; otherwise map by stage
+      if (message.startsWith('Error#')) {
+        setStatus(message);
       } else {
-        setStatus(`Error: ${raw}`);
+        const stageMap: Record<string, string> = {
+          agent_sign:
+            'Error#102 — Agent approval step failed or was canceled by the user.',
+          agent_submit: 'Error#104 — Failed to register agent on Hyperliquid.',
+          builder_sign:
+            'Error#103 — Builder fee approval step failed or was canceled by the user.',
+          builder_submit: 'Error#105 — Failed to register builder fee on Hyperliquid.',
+          save: 'Error#106 — Failed to save activation data.',
+        };
+        setStatus(
+          `${stageMap[stage] ?? 'Error#109 — Unexpected error during activation.'} ${message}`
+        );
       }
     } finally {
       setLoading(false);
     }
   };
+
+  const insufficientFunds =
+    accountInfo.balance !== null && accountInfo.balance < MIN_BALANCE_USD;
+  const agentOk = !!accountInfo.agent;
+  const typeOk =
+    accountInfo.accountType === 'user' ||
+    (accountInfo.accountType?.startsWith('subAccount') ?? false);
 
   return (
     <main
@@ -398,12 +568,126 @@ export default function Home() {
             marginBottom: '8px',
           }}
         >
-          <ConnectButton
-            label="Connect wallet"
-            showBalance={false}
-            accountStatus="address"
-          />
+          <ConnectButton label="Connect wallet" showBalance={false} accountStatus="address" />
         </div>
+
+        {/* ===== Account status panel ===== */}
+        {isConnected && (
+          <div
+            style={{
+              marginTop: '16px',
+              padding: '14px 14px',
+              borderRadius: '12px',
+              border: '1px solid #30363d',
+              background: '#0d1117',
+              textAlign: 'left',
+              fontSize: '13px',
+              lineHeight: 1.45,
+            }}
+          >
+            {accountInfo.loading && (
+              <p style={{ margin: 0, color: '#8b949e' }}>Loading account data…</p>
+            )}
+
+            {accountInfo.error && (
+              <p style={{ margin: 0, color: '#ff7b72' }}>{accountInfo.error}</p>
+            )}
+
+            {!accountInfo.loading && !accountInfo.error && (
+              <>
+                {/* Balance — no check/cross */}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: 10,
+                    gap: 8,
+                  }}
+                >
+                  <span style={{ color: '#8b949e' }}>Balance</span>
+                  <span style={{ color: '#e6edf3', fontWeight: 600 }}>
+                    {accountInfo.balance !== null
+                      ? `$${accountInfo.balance.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}`
+                      : '—'}
+                  </span>
+                </div>
+
+                {insufficientFunds ? (
+                  <p
+                    style={{
+                      margin: '0 0 4px',
+                      color: '#e3b341',
+                      fontWeight: 600,
+                      fontSize: '13px',
+                    }}
+                  >
+                    Insufficient funds
+                  </p>
+                ) : (
+                  <>
+                    {/* Agent — with check/cross */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        marginBottom: 10,
+                        gap: 8,
+                      }}
+                    >
+                      <span style={{ color: '#8b949e', flexShrink: 0 }}>Agent</span>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          textAlign: 'right',
+                          minWidth: 0,
+                        }}
+                      >
+                        <span
+                          style={{
+                            color: '#e6edf3',
+                            fontWeight: 500,
+                            wordBreak: 'break-all',
+                            fontSize: '12px',
+                          }}
+                        >
+                          {accountInfo.agent
+                            ? `${accountInfo.agent.name} · ${accountInfo.agent.address.slice(0, 6)}…${accountInfo.agent.address.slice(-4)}`
+                            : 'Not registered'}
+                        </span>
+                        <CheckIcon ok={agentOk} />
+                      </div>
+                    </div>
+
+                    {/* Account type — with check/cross */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <span style={{ color: '#8b949e' }}>Account type</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ color: '#e6edf3', fontWeight: 500 }}>
+                          {accountInfo.accountType ?? '—'}
+                        </span>
+                        <CheckIcon ok={typeOk} />
+                      </div>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {isConnected && (
           <div style={{ marginTop: '20px' }}>
@@ -424,9 +708,7 @@ export default function Home() {
                 letterSpacing: '0.01em',
                 cursor: loading ? 'not-allowed' : 'pointer',
                 transition: 'opacity 0.2s, transform 0.15s',
-                boxShadow: loading
-                  ? 'none'
-                  : '0 4px 20px rgba(46, 230, 197, 0.25)',
+                boxShadow: loading ? 'none' : '0 4px 20px rgba(46, 230, 197, 0.25)',
               }}
               onMouseEnter={(e) => {
                 if (!loading) e.currentTarget.style.opacity = '0.92';
@@ -446,6 +728,7 @@ export default function Home() {
                   fontSize: '13px',
                   lineHeight: 1.45,
                   color: status.startsWith('Error') ? '#ff7b72' : '#7ee787',
+                  wordBreak: 'break-word',
                 }}
               >
                 {status}
