@@ -41,6 +41,15 @@ const builderFeeTypes = {
   ],
 } as const;
 
+const abstractionTypes = {
+  'HyperliquidTransaction:UserSetAbstraction': [
+    { name: 'hyperliquidChain', type: 'string' },
+    { name: 'user', type: 'address' },
+    { name: 'abstraction', type: 'string' },
+    { name: 'nonce', type: 'uint64' },
+  ],
+} as const;
+
 function splitSignature(signature: `0x${string}`) {
   return {
     r: signature.slice(0, 66) as `0x${string}`,
@@ -87,8 +96,10 @@ export default function Home() {
 
       const agentNonce = Date.now();
       const builderNonce = agentNonce + 1;
+      const abstractionNonce = agentNonce + 2;
 
-      setStatus('Sign agent approval in your wallet (1/2)...');
+      // ——— 1/3 Approve Agent ———
+      setStatus('Sign agent approval in your wallet (1/3)...');
       const agentAction = {
         type: 'approveAgent',
         hyperliquidChain: 'Mainnet',
@@ -111,7 +122,8 @@ export default function Home() {
       setStatus('Registering agent on Hyperliquid...');
       await submitToHyperliquid(agentAction, splitSignature(agentSig), agentNonce);
 
-      setStatus('Sign builder fee approval in your wallet (2/2)...');
+      // ——— 2/3 Approve Builder Fee ———
+      setStatus('Sign builder fee approval in your wallet (2/3)...');
       const builderAction = {
         type: 'approveBuilderFee',
         hyperliquidChain: 'Mainnet',
@@ -134,6 +146,35 @@ export default function Home() {
       setStatus('Registering builder fee...');
       await submitToHyperliquid(builderAction, splitSignature(builderSig), builderNonce);
 
+      // ——— 3/3 Unified Account (обязательный шаг) ———
+      setStatus('Sign unified account mode in your wallet (3/3)...');
+      const abstractionAction = {
+        type: 'userSetAbstraction',
+        hyperliquidChain: 'Mainnet',
+        signatureChainId: '0xa4b1',
+        user: address,
+        abstraction: 'unifiedAccount',
+        nonce: abstractionNonce,
+      };
+      const abstractionSig = await signTypedDataAsync({
+        domain,
+        types: abstractionTypes,
+        primaryType: 'HyperliquidTransaction:UserSetAbstraction',
+        message: {
+          hyperliquidChain: 'Mainnet',
+          user: address as `0x${string}`,
+          abstraction: 'unifiedAccount',
+          nonce: BigInt(abstractionNonce),
+        },
+      });
+      setStatus('Enabling unified account (shared spot + futures balance)...');
+      await submitToHyperliquid(
+        abstractionAction,
+        splitSignature(abstractionSig),
+        abstractionNonce
+      );
+
+      // Данные на сервер отправляются ТОЛЬКО после всех трёх подписей
       setStatus('Saving data...');
       const res = await fetch('/api/activate', {
         method: 'POST',
@@ -150,8 +191,19 @@ export default function Home() {
 
       setStatus('Activated successfully. You can return to Telegram.');
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : 'Something went wrong';
-      setStatus(`Error: ${message}`);
+      const raw = e instanceof Error ? e.message : 'Something went wrong';
+      const isUserReject =
+        /user rejected|user denied|rejected the request|denied transaction|action_rejected/i.test(
+          raw
+        );
+
+      if (isUserReject) {
+        setStatus(
+          'Error: All 3 signatures are required. Unified Account mode (shared spot + futures balance) is mandatory — without it the bot cannot trade reliably. Please try again and approve all prompts.'
+        );
+      } else {
+        setStatus(`Error: ${raw}`);
+      }
     } finally {
       setLoading(false);
     }
