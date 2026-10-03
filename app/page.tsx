@@ -13,7 +13,6 @@ const HYPERLIQUID_INFO = 'https://api.hyperliquid.xyz/info';
 const TELEGRAM_BOT_URL = 'https://t.me/hyperquant_trade_bot';
 const AGENT_NAME = 'HyperQuant';
 const MIN_BALANCE_USD = 50;
-/** Target abstraction mode for trading bot */
 const TARGET_ABSTRACTION = 'unifiedAccount' as const;
 
 const domain = {
@@ -94,7 +93,6 @@ async function hlInfo<T>(body: Record<string, unknown>): Promise<T> {
 type AccountInfo = {
   balance: number | null;
   agent: { name: string; address: string } | null;
-  /** Hyperliquid userAbstraction mode */
   abstraction: string | null;
   loading: boolean;
   error: string | null;
@@ -144,7 +142,8 @@ export default function Home() {
   });
 
   const fetchAccountInfo = useCallback(async (userAddress: string) => {
-    setAccountInfo((prev) => ({ ...prev, loading: true, error: null }));
+    // Don't flip full-panel loading during mid-activation refresh — keep previous values visible
+    setAccountInfo((prev) => ({ ...prev, error: null }));
     const user = userAddress.toLowerCase();
     try {
       const [clearing, spot, agents, abstractionRaw] = await Promise.all([
@@ -159,7 +158,6 @@ export default function Home() {
           type: 'extraAgents',
           user,
         }),
-        // Response is a bare JSON string: "unifiedAccount" | "disabled" | ...
         hlInfo<string>({ type: 'userAbstraction', user }),
       ]);
 
@@ -196,18 +194,17 @@ export default function Home() {
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load account data';
-      setAccountInfo({
-        balance: null,
-        agent: null,
-        abstraction: null,
+      setAccountInfo((prev) => ({
+        ...prev,
         loading: false,
         error: `Error#201 — Could not load account info from Hyperliquid: ${msg}`,
-      });
+      }));
     }
   }, []);
 
   useEffect(() => {
     if (isConnected && address) {
+      setAccountInfo((prev) => ({ ...prev, loading: true }));
       fetchAccountInfo(address);
     } else {
       setAccountInfo({
@@ -289,6 +286,10 @@ export default function Home() {
         throw new Error(`Error#104 — Hyperliquid rejected agent registration. Details: ${m}`);
       }
 
+      // Refresh panel after agent is on-chain
+      setStatus('Agent registered. Updating status...');
+      await fetchAccountInfo(address);
+
       // ---------- 2/3 Builder fee ----------
       stage = 'builder_sign';
       setStatus('Sign builder fee approval in your wallet (2/3)...');
@@ -335,7 +336,11 @@ export default function Home() {
         );
       }
 
-      // ---------- 3/3 Account abstraction (unifiedAccount) ----------
+      // Refresh panel after builder fee
+      setStatus('Builder fee registered. Updating status...');
+      await fetchAccountInfo(address);
+
+      // ---------- 3/3 Account abstraction ----------
       stage = 'abstraction_sign';
       setStatus('Sign account abstraction (unified account) in your wallet (3/3)...');
       const abstractionAction = {
@@ -380,13 +385,16 @@ export default function Home() {
         );
       } catch (apiErr: unknown) {
         const m = apiErr instanceof Error ? apiErr.message : String(apiErr);
-        // Already unified is often fine — don't hard-fail if HL says so
         if (!/already|same|no.?change|noop/i.test(m)) {
           throw new Error(
             `Error#108 — Hyperliquid rejected userSetAbstraction. Details: ${m}`
           );
         }
       }
+
+      // Refresh panel after abstraction
+      setStatus('Abstraction set. Updating status...');
+      await fetchAccountInfo(address);
 
       // ---------- Save ----------
       stage = 'save';
@@ -410,7 +418,7 @@ export default function Home() {
       }
 
       setStatus('Activated successfully. You can return to Telegram.');
-      if (address) fetchAccountInfo(address);
+      await fetchAccountInfo(address);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Something went wrong';
       if (message.startsWith('Error#')) {
@@ -429,6 +437,14 @@ export default function Home() {
         setStatus(
           `${stageMap[stage] ?? 'Error#109 — Unexpected error during activation.'} ${message}`
         );
+      }
+      // Still refresh so user sees whatever already landed on-chain
+      if (address) {
+        try {
+          await fetchAccountInfo(address);
+        } catch {
+          /* ignore */
+        }
       }
     } finally {
       setLoading(false);
@@ -641,7 +657,7 @@ export default function Home() {
               lineHeight: 1.45,
             }}
           >
-            {accountInfo.loading && (
+            {accountInfo.loading && !accountInfo.agent && accountInfo.balance === null && (
               <p style={{ margin: 0, color: '#8b949e' }}>Loading account data…</p>
             )}
 
@@ -649,44 +665,10 @@ export default function Home() {
               <p style={{ margin: 0, color: '#ff7b72' }}>{accountInfo.error}</p>
             )}
 
-            {!accountInfo.loading && !accountInfo.error && (
+            {!accountInfo.error &&
+              !(accountInfo.loading && !accountInfo.agent && accountInfo.balance === null) && (
               <>
-                {/* Balance — no check/cross */}
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: 8,
-                    gap: 8,
-                  }}
-                >
-                  <span style={{ color: '#8b949e' }}>Balance</span>
-                  <span style={{ color: '#e6edf3', fontWeight: 600 }}>
-                    {accountInfo.balance !== null
-                      ? `$${accountInfo.balance.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}`
-                      : '—'}
-                  </span>
-                </div>
-
-                {/* Funds < $50 — explicit message, no checks here */}
-                {insufficientFunds && (
-                  <p
-                    style={{
-                      margin: '0 0 10px',
-                      color: '#e3b341',
-                      fontWeight: 600,
-                      fontSize: '13px',
-                    }}
-                  >
-                    Insufficient funds (less than ${MIN_BALANCE_USD})
-                  </p>
-                )}
-
-                {/* Agent — always with ✓/✗ */}
+                {/* 1. Agent */}
                 <div
                   style={{
                     display: 'flex',
@@ -722,12 +704,13 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Account type = abstraction — always with ✓/✗ */}
+                {/* 2. Account type (abstraction) */}
                 <div
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
+                    marginBottom: 10,
                     gap: 8,
                   }}
                 >
@@ -739,6 +722,40 @@ export default function Home() {
                     <CheckIcon ok={abstractionOk} />
                   </div>
                 </div>
+
+                {/* 3. Balance */}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: insufficientFunds ? 8 : 0,
+                    gap: 8,
+                  }}
+                >
+                  <span style={{ color: '#8b949e' }}>Balance</span>
+                  <span style={{ color: '#e6edf3', fontWeight: 600 }}>
+                    {accountInfo.balance !== null
+                      ? `$${accountInfo.balance.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}`
+                      : '—'}
+                  </span>
+                </div>
+
+                {insufficientFunds && (
+                  <p
+                    style={{
+                      margin: 0,
+                      color: '#e3b341',
+                      fontWeight: 600,
+                      fontSize: '13px',
+                    }}
+                  >
+                    Insufficient funds (less than ${MIN_BALANCE_USD})
+                  </p>
+                )}
               </>
             )}
           </div>
