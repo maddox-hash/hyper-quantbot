@@ -49,6 +49,29 @@ const abstractionTypes = {
   ],
 } as const;
 
+const FAQ_ITEMS: { q: string; a: string }[] = [
+  {
+    q: 'What bots do you offer?',
+    a: 'Classic DCA, Grid and Combo bots — with optional indicators, signals and webhooks. Flexible trailing is supported, including per-level trailing inside the Grid bot.\n\nQuant Bot combines three built-in strategies to decide trade entries.\n\nA Custom Bot is also in development and will offer the most flexible settings.',
+  },
+  {
+    q: 'Do you have access to my funds?',
+    a: 'No. You only create a trading agent on Hyperliquid and connect its API so our bots can trade on your behalf. We never hold your funds or private keys. A trading agent cannot withdraw or transfer your funds — this is documented in Hyperliquid’s own docs.',
+  },
+  {
+    q: 'What is the 0.01% builder fee?',
+    a: 'It is our service fee on top of Hyperliquid’s own exchange fee (0.015%). It only applies on the FREE plan. The DEMO plan carries a separate 0.03% fee when trading with the Quant Bot.',
+  },
+  {
+    q: 'What is the minimum amount required for the bots to work?',
+    a: 'It depends on the bot type, but in all cases you need at least $50 for correct operation — otherwise the bot cannot be started.\n\nFor Quant Bot we recommend at least $200, because it follows a fixed built-in strategy and does not offer flexible settings.',
+  },
+  {
+    q: 'What is a Unified Account?',
+    a: 'A Unified Account merges your spot and futures balances into one account for simpler trading. It is required for agents to work correctly and to avoid common errors.\n\nBy default it is enabled on all new accounts. Do not confuse it with hedging mode.',
+  },
+];
+
 function splitSignature(signature: `0x${string}`) {
   return {
     r: signature.slice(0, 66) as `0x${string}`,
@@ -121,9 +144,120 @@ function CheckIcon({ ok }: { ok: boolean }) {
   );
 }
 
+/** Only unifiedAccount counts as valid — portfolioMargin does not. */
 function isAbstractionOk(mode: string | null) {
-  if (!mode) return false;
-  return mode === 'unifiedAccount' || mode === 'portfolioMargin';
+  return mode === 'unifiedAccount';
+}
+
+function FaqAccordion() {
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+
+  return (
+    <div
+      style={{
+        marginTop: 28,
+        width: '100%',
+        maxWidth: 420,
+        textAlign: 'left',
+      }}
+    >
+      <h2
+        style={{
+          margin: '0 0 14px',
+          fontSize: 15,
+          fontWeight: 700,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+          color: '#8b949e',
+          textAlign: 'center',
+        }}
+      >
+        FAQ
+      </h2>
+      <div
+        style={{
+          borderRadius: 14,
+          border: '1px solid rgba(48, 54, 61, 0.95)',
+          background: 'linear-gradient(165deg, #161b22 0%, #0f1318 100%)',
+          overflow: 'hidden',
+          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.35)',
+        }}
+      >
+        {FAQ_ITEMS.map((item, i) => {
+          const open = openIndex === i;
+          return (
+            <div
+              key={item.q}
+              style={{
+                borderTop: i === 0 ? 'none' : '1px solid #21262d',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setOpenIndex(open ? null : i)}
+                aria-expanded={open}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  padding: '14px 16px',
+                  background: open ? 'rgba(46, 230, 197, 0.06)' : 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  color: '#e6edf3',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  lineHeight: 1.4,
+                  fontFamily: 'inherit',
+                }}
+              >
+                <span>{item.q}</span>
+                <span
+                  style={{
+                    flexShrink: 0,
+                    width: 22,
+                    height: 22,
+                    borderRadius: 6,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: open
+                      ? 'rgba(46, 230, 197, 0.18)'
+                      : 'rgba(48, 54, 61, 0.8)',
+                    color: open ? '#2ee6c5' : '#8b949e',
+                    fontSize: 16,
+                    fontWeight: 700,
+                    lineHeight: 1,
+                    transition: 'transform 0.2s, background 0.15s',
+                    transform: open ? 'rotate(45deg)' : 'none',
+                  }}
+                  aria-hidden
+                >
+                  +
+                </span>
+              </button>
+              {open && (
+                <div
+                  style={{
+                    padding: '0 16px 16px',
+                    color: '#8b949e',
+                    fontSize: 13,
+                    lineHeight: 1.55,
+                    whiteSpace: 'pre-line',
+                  }}
+                >
+                  {item.a}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export default function Home() {
@@ -142,7 +276,6 @@ export default function Home() {
   });
 
   const fetchAccountInfo = useCallback(async (userAddress: string) => {
-    // Don't flip full-panel loading during mid-activation refresh — keep previous values visible
     setAccountInfo((prev) => ({ ...prev, error: null }));
     const user = userAddress.toLowerCase();
     try {
@@ -217,6 +350,12 @@ export default function Home() {
     }
   }, [isConnected, address, fetchAccountInfo]);
 
+  const handleRefresh = async () => {
+    if (!address || accountInfo.loading) return;
+    setAccountInfo((prev) => ({ ...prev, loading: true }));
+    await fetchAccountInfo(address);
+  };
+
   const handleApproveAndActivate = async () => {
     if (!address) {
       setStatus('Error#101 — Wallet is not connected. Connect your wallet first.');
@@ -286,7 +425,6 @@ export default function Home() {
         throw new Error(`Error#104 — Hyperliquid rejected agent registration. Details: ${m}`);
       }
 
-      // Refresh panel after agent is on-chain
       setStatus('Agent registered. Updating status...');
       await fetchAccountInfo(address);
 
@@ -336,11 +474,10 @@ export default function Home() {
         );
       }
 
-      // Refresh panel after builder fee
       setStatus('Builder fee registered. Updating status...');
       await fetchAccountInfo(address);
 
-      // ---------- 3/3 Account abstraction ----------
+      // ---------- 3/3 Account abstraction (unifiedAccount only) ----------
       stage = 'abstraction_sign';
       setStatus('Sign account abstraction (unified account) in your wallet (3/3)...');
       const abstractionAction = {
@@ -392,7 +529,6 @@ export default function Home() {
         }
       }
 
-      // Refresh panel after abstraction
       setStatus('Abstraction set. Updating status...');
       await fetchAccountInfo(address);
 
@@ -438,7 +574,6 @@ export default function Home() {
           `${stageMap[stage] ?? 'Error#109 — Unexpected error during activation.'} ${message}`
         );
       }
-      // Still refresh so user sees whatever already landed on-chain
       if (address) {
         try {
           await fetchAccountInfo(address);
@@ -456,6 +591,9 @@ export default function Home() {
   const agentOk = !!accountInfo.agent;
   const abstractionOk = isAbstractionOk(accountInfo.abstraction);
 
+  const needsActivation = !agentOk || !abstractionOk;
+  const activateDisabled = loading || accountInfo.loading || !needsActivation;
+
   return (
     <main
       style={{
@@ -464,7 +602,7 @@ export default function Home() {
         alignItems: 'center',
         justifyContent: 'center',
         minHeight: '100vh',
-        padding: '24px 16px',
+        padding: '24px 16px 48px',
         boxSizing: 'border-box',
         background:
           'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(46, 230, 197, 0.12), transparent), #0b0e14',
@@ -643,7 +781,6 @@ export default function Home() {
           <ConnectButton label="Connect wallet" showBalance={false} accountStatus="address" />
         </div>
 
-        {/* ===== Account status panel ===== */}
         {isConnected && (
           <div
             style={{
@@ -655,6 +792,7 @@ export default function Home() {
               textAlign: 'left',
               fontSize: '13px',
               lineHeight: 1.45,
+              position: 'relative',
             }}
           >
             {accountInfo.loading && !accountInfo.agent && accountInfo.balance === null && (
@@ -668,7 +806,6 @@ export default function Home() {
             {!accountInfo.error &&
               !(accountInfo.loading && !accountInfo.agent && accountInfo.balance === null) && (
               <>
-                {/* 1. Agent */}
                 <div
                   style={{
                     display: 'flex',
@@ -704,7 +841,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* 2. Account type (abstraction) */}
                 <div
                   style={{
                     display: 'flex',
@@ -723,7 +859,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* 3. Balance */}
                 <div
                   style={{
                     display: 'flex',
@@ -734,14 +869,59 @@ export default function Home() {
                   }}
                 >
                   <span style={{ color: '#8b949e' }}>Balance</span>
-                  <span style={{ color: '#e6edf3', fontWeight: 600 }}>
-                    {accountInfo.balance !== null
-                      ? `$${accountInfo.balance.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}`
-                      : '—'}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: '#e6edf3', fontWeight: 600 }}>
+                      {accountInfo.balance !== null
+                        ? `$${accountInfo.balance.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}`
+                        : '—'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleRefresh}
+                      disabled={accountInfo.loading || loading}
+                      title="Refresh"
+                      aria-label="Refresh account data"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 28,
+                        height: 28,
+                        padding: 0,
+                        borderRadius: 6,
+                        border: '1px solid #30363d',
+                        background: accountInfo.loading
+                          ? '#21262d'
+                          : 'rgba(46, 230, 197, 0.08)',
+                        color: '#2ee6c5',
+                        cursor: accountInfo.loading || loading ? 'not-allowed' : 'pointer',
+                        opacity: accountInfo.loading || loading ? 0.5 : 1,
+                        flexShrink: 0,
+                      }}
+                    >
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        style={{
+                          animation: accountInfo.loading
+                            ? 'hqSpin 0.8s linear infinite'
+                            : undefined,
+                        }}
+                      >
+                        <path d="M21 12a9 9 0 1 1-2.6-6.3" />
+                        <polyline points="21 3 21 9 15 9" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
 
                 {insufficientFunds && (
@@ -765,31 +945,37 @@ export default function Home() {
           <div style={{ marginTop: '20px' }}>
             <button
               onClick={handleApproveAndActivate}
-              disabled={loading}
+              disabled={activateDisabled}
               style={{
                 width: '100%',
                 padding: '14px 16px',
                 borderRadius: '10px',
                 border: 'none',
-                background: loading
+                background: activateDisabled
                   ? '#30363d'
                   : 'linear-gradient(90deg, #2ee6c5 0%, #5ef0d4 100%)',
-                color: loading ? '#8b949e' : '#0b0e14',
+                color: activateDisabled ? '#8b949e' : '#0b0e14',
                 fontWeight: 700,
                 fontSize: '15px',
                 letterSpacing: '0.01em',
-                cursor: loading ? 'not-allowed' : 'pointer',
+                cursor: activateDisabled ? 'not-allowed' : 'pointer',
                 transition: 'opacity 0.2s, transform 0.15s',
-                boxShadow: loading ? 'none' : '0 4px 20px rgba(46, 230, 197, 0.25)',
+                boxShadow: activateDisabled
+                  ? 'none'
+                  : '0 4px 20px rgba(46, 230, 197, 0.25)',
               }}
               onMouseEnter={(e) => {
-                if (!loading) e.currentTarget.style.opacity = '0.92';
+                if (!activateDisabled) e.currentTarget.style.opacity = '0.92';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.opacity = '1';
               }}
             >
-              {loading ? 'Processing...' : 'Activate Hyper Quant'}
+              {loading
+                ? 'Processing...'
+                : !needsActivation
+                  ? 'Already activated'
+                  : 'Activate Hyper Quant'}
             </button>
 
             {status && (
@@ -862,6 +1048,10 @@ export default function Home() {
               0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(63, 185, 80, 0.7); transform: scale(1); }
               50% { opacity: 0.35; box-shadow: 0 0 2px rgba(63, 185, 80, 0.25); transform: scale(0.85); }
             }
+            @keyframes hqSpin {
+              from { transform: rotate(0deg); }
+              to { transform: rotate(360deg); }
+            }
           `}</style>
           <span
             style={{
@@ -880,6 +1070,9 @@ export default function Home() {
           </span>
         </div>
       </div>
+
+      {/* FAQ below the main card */}
+      <FaqAccordion />
     </main>
   );
 }
