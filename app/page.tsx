@@ -207,6 +207,10 @@ const FAQ_ITEMS: FaqItem[] = [
     demo: 'bots',
   },
   {
+    q: 'Why is max leverage limited to 3x on Quant Bot?',
+    a: 'Higher leverage increases liquidation risk and reduces the room the strategy needs to work through normal market noise.\n\n3x is the best balance between returns and safety for this system. Backtests of the strategy at this leverage showed strong flexibility across different market regimes, solid income, and more stable equity curves compared with higher leverage settings.',
+  },
+  {
     q: 'Do you have access to my funds?',
     a: (
       <>
@@ -242,16 +246,10 @@ const FAQ_ITEMS: FaqItem[] = [
   },
 ];
 
-/** Smooth lerp helper */
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * Math.min(1, Math.max(0, t));
 }
 
-/**
- * DCA then Grid.
- * Grid: price down → 3 BUY fills (each becomes SELL above) →
- * price up → 3 SELL fills (levels disappear). No end jitter.
- */
 function BotsDemo({ active }: { active: boolean }) {
   const [t, setT] = useState(0);
   const raf = useRef(0);
@@ -281,7 +279,6 @@ function BotsDemo({ active }: { active: boolean }) {
   const dcaPhase = t < 0.4;
   const u = dcaPhase ? t / 0.4 : (t - 0.4) / 0.6;
 
-  // ——— DCA ———
   const dcaBuyTimes = [0.15, 0.32, 0.48];
   const dcaBuyPrices = [0.32, 0.48, 0.64];
 
@@ -315,77 +312,43 @@ function BotsDemo({ active }: { active: boolean }) {
   const tpY = Math.max(0.1, avgY - 0.2);
   const tpHit = filledDca.length >= 3 && u >= 0.78 && dcaPrice(u) <= tpY + 0.03;
 
-  // ——— Grid ———
-  // Buy ladder (higher y = lower price on chart)
   const buyYs = [0.56, 0.68, 0.8];
   const sellOffset = 0.1;
-  const sellYs = buyYs.map((y) => y - sellOffset); // above each buy
-
-  // Timeline within grid phase u ∈ [0,1]
+  const sellYs = buyYs.map((y) => y - sellOffset);
   const buyFillAt = [0.12, 0.24, 0.36];
-  const turnAt = 0.44; // start rising
-  const sellFillAt = [0.52, 0.64, 0.76]; // deepest sell first (highest y), then up
-  // sell order: fill lowest sell first (sellYs[2]), then [1], then [0]
+  const turnAt = 0.44;
+  const sellFillAt = [0.52, 0.64, 0.76];
   const sellOrder = [2, 1, 0];
 
   const gridPrice = (x: number) => {
-    // continuous piecewise path — no hold plateau that can “shake”
-    if (x <= buyFillAt[0]) {
-      return lerp(0.38, buyYs[0], x / buyFillAt[0]);
-    }
+    if (x <= buyFillAt[0]) return lerp(0.38, buyYs[0], x / buyFillAt[0]);
     if (x <= buyFillAt[1]) {
-      return lerp(
-        buyYs[0],
-        buyYs[1],
-        (x - buyFillAt[0]) / (buyFillAt[1] - buyFillAt[0])
-      );
+      return lerp(buyYs[0], buyYs[1], (x - buyFillAt[0]) / (buyFillAt[1] - buyFillAt[0]));
     }
     if (x <= buyFillAt[2]) {
-      return lerp(
-        buyYs[1],
-        buyYs[2],
-        (x - buyFillAt[1]) / (buyFillAt[2] - buyFillAt[1])
-      );
+      return lerp(buyYs[1], buyYs[2], (x - buyFillAt[1]) / (buyFillAt[2] - buyFillAt[1]));
     }
     if (x <= turnAt) {
-      // short smooth dip past last buy
       return lerp(buyYs[2], buyYs[2] + 0.04, (x - buyFillAt[2]) / (turnAt - buyFillAt[2]));
     }
-    // rise through sells: bottom → sellYs[2] → sellYs[1] → sellYs[0] → slightly above
     if (x <= sellFillAt[0]) {
-      return lerp(
-        buyYs[2] + 0.04,
-        sellYs[2],
-        (x - turnAt) / (sellFillAt[0] - turnAt)
-      );
+      return lerp(buyYs[2] + 0.04, sellYs[2], (x - turnAt) / (sellFillAt[0] - turnAt));
     }
     if (x <= sellFillAt[1]) {
-      return lerp(
-        sellYs[2],
-        sellYs[1],
-        (x - sellFillAt[0]) / (sellFillAt[1] - sellFillAt[0])
-      );
+      return lerp(sellYs[2], sellYs[1], (x - sellFillAt[0]) / (sellFillAt[1] - sellFillAt[0]));
     }
     if (x <= sellFillAt[2]) {
-      return lerp(
-        sellYs[1],
-        sellYs[0],
-        (x - sellFillAt[1]) / (sellFillAt[2] - sellFillAt[1])
-      );
+      return lerp(sellYs[1], sellYs[0], (x - sellFillAt[1]) / (sellFillAt[2] - sellFillAt[1]));
     }
-    // calm finish above top sell — flat, no oscillation
     return lerp(sellYs[0], sellYs[0] - 0.06, (x - sellFillAt[2]) / (1 - sellFillAt[2]));
   };
 
   type GLevel = { y: number; kind: 'buy' | 'sell'; flash: boolean };
   const levels: GLevel[] = [];
-
   for (let i = 0; i < 3; i++) {
     const buyFilled = u >= buyFillAt[i];
-    // sell index in sellFillAt for this slot: slot 2 fills first
     const sellIdx = sellOrder.indexOf(i);
     const sellFilled = u >= sellFillAt[sellIdx];
-
     if (!buyFilled) {
       levels.push({
         y: buyYs[i],
@@ -399,7 +362,6 @@ function BotsDemo({ active }: { active: boolean }) {
         flash: u >= sellFillAt[sellIdx] - 0.035 && u < sellFillAt[sellIdx],
       });
     }
-    // after sell filled → level gone
   }
 
   const priceFn = dcaPhase ? dcaPrice : gridPrice;
@@ -420,15 +382,11 @@ function BotsDemo({ active }: { active: boolean }) {
   const fillMarkers: { x: number; y: number; kind: 'buy' | 'sell' }[] = [];
   if (!dcaPhase) {
     buyFillAt.forEach((ft, i) => {
-      if (u >= ft && u < ft + 0.05) {
-        fillMarkers.push({ x: ft, y: buyYs[i], kind: 'buy' });
-      }
+      if (u >= ft && u < ft + 0.05) fillMarkers.push({ x: ft, y: buyYs[i], kind: 'buy' });
     });
     sellFillAt.forEach((ft, si) => {
       const slot = sellOrder[si];
-      if (u >= ft && u < ft + 0.05) {
-        fillMarkers.push({ x: ft, y: sellYs[slot], kind: 'sell' });
-      }
+      if (u >= ft && u < ft + 0.05) fillMarkers.push({ x: ft, y: sellYs[slot], kind: 'sell' });
     });
   }
 
@@ -480,7 +438,6 @@ function BotsDemo({ active }: { active: boolean }) {
           />
         ))}
         <polygon points={areaPts.join(' ')} fill="url(#hqAreaBots)" />
-
         {dcaPhase && filledDca.length > 0 && (
           <>
             <line
@@ -509,7 +466,6 @@ function BotsDemo({ active }: { active: boolean }) {
             </text>
           </>
         )}
-
         {dcaPhase &&
           dcaBuyTimes.map((bt, i) =>
             u >= bt ? (
@@ -527,13 +483,11 @@ function BotsDemo({ active }: { active: boolean }) {
               </g>
             ) : null
           )}
-
         {dcaPhase && tpHit && (
           <text x={cx + 6} y={cy - 8} fill="#3fb950" fontSize={10} fontWeight={700}>
             TAKE
           </text>
         )}
-
         {!dcaPhase &&
           levels.map((lv, i) => (
             <g key={i}>
@@ -565,7 +519,6 @@ function BotsDemo({ active }: { active: boolean }) {
               </text>
             </g>
           ))}
-
         {!dcaPhase &&
           fillMarkers.map((m, i) => (
             <circle
@@ -577,7 +530,6 @@ function BotsDemo({ active }: { active: boolean }) {
               opacity={0.95}
             />
           ))}
-
         <polyline
           points={linePts.join(' ')}
           fill="none"
@@ -923,6 +875,7 @@ export default function Home() {
   const { signTypedDataAsync } = useSignTypedData();
 
   const [telegramId, setTelegramId] = useState('');
+  const [telegramConfirmed, setTelegramConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [statusWarn, setStatusWarn] = useState(false);
@@ -1009,6 +962,10 @@ export default function Home() {
       setSessionDone(false);
     }
   }, [isConnected, address, fetchAccountInfo]);
+
+  const handleConfirmTelegram = () => {
+    setTelegramConfirmed(true);
+  };
 
   const handleApproveAndActivate = async () => {
     if (!address) {
@@ -1373,74 +1330,150 @@ export default function Home() {
         </p>
 
         <div style={{ textAlign: 'left', marginBottom: 18 }}>
-          <label
-            htmlFor="telegram-id"
-            style={{
-              display: 'block',
-              fontSize: 11,
-              fontWeight: 600,
-              color: 'var(--hq-dim)',
-              marginBottom: 8,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-            }}
-          >
-            Telegram ID
-          </label>
-          <div style={{ position: 'relative' }}>
-            <span
-              aria-hidden
+          {!telegramConfirmed ? (
+            <>
+              <label
+                htmlFor="telegram-id"
+                style={{
+                  display: 'block',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: 'var(--hq-dim)',
+                  marginBottom: 8,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                Telegram ID
+              </label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                  <span
+                    aria-hidden
+                    style={{
+                      position: 'absolute',
+                      left: 14,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      display: 'flex',
+                      color: 'var(--hq-dim)',
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+                    </svg>
+                  </span>
+                  <input
+                    id="telegram-id"
+                    type="text"
+                    inputMode="text"
+                    autoComplete="off"
+                    placeholder="@Nickname"
+                    value={telegramId}
+                    onChange={(e) => setTelegramId(e.target.value.replace(/[^a-zA-Z0-9_@]/g, ''))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleConfirmTelegram();
+                    }}
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      padding: '13px 14px 13px 40px',
+                      borderRadius: 12,
+                      border: '1px solid rgba(48, 54, 61, 0.9)',
+                      background: '#0d1117',
+                      color: 'var(--hq-text)',
+                      fontSize: 15,
+                      fontFamily: 'var(--hq-font)',
+                      outline: 'none',
+                      transition: 'border-color 0.15s, box-shadow 0.15s',
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
+                      e.currentTarget.style.boxShadow = '0 0 0 3px rgba(46, 230, 197, 0.1)';
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = 'rgba(48, 54, 61, 0.9)';
+                      e.currentTarget.style.boxShadow = 'none';
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleConfirmTelegram}
+                  style={{
+                    flexShrink: 0,
+                    padding: '0 18px',
+                    borderRadius: 12,
+                    border: 'none',
+                    background: 'linear-gradient(90deg, var(--hq-accent) 0%, var(--hq-accent-2) 100%)',
+                    color: '#0b0e14',
+                    fontWeight: 700,
+                    fontSize: 14,
+                    fontFamily: 'var(--hq-font)',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 12px rgba(46, 230, 197, 0.25)',
+                  }}
+                >
+                  Accept
+                </button>
+              </div>
+              <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--hq-muted)', lineHeight: 1.5 }}>
+                <span style={{ color: 'var(--hq-warn)', fontWeight: 600 }}>Note:</span> Enter your
+                Telegram @Nickname if you have an active paid subscription. Leave empty on the free
+                plan — a builder fee of <span style={{ color: 'var(--hq-accent)' }}>0.01%</span>{' '}
+                applies (up to <span style={{ color: 'var(--hq-accent)' }}>0.03%</span> for Quant Bot
+                on DEMO).
+              </p>
+            </>
+          ) : (
+            <div
               style={{
-                position: 'absolute',
-                left: 14,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                display: 'flex',
-                color: 'var(--hq-dim)',
+                padding: '16px 18px',
+                borderRadius: 14,
+                border: '1px solid rgba(46, 230, 197, 0.35)',
+                background:
+                  'linear-gradient(135deg, rgba(46, 230, 197, 0.1) 0%, rgba(46, 230, 197, 0.04) 100%)',
+                boxShadow: '0 0 24px rgba(46, 230, 197, 0.08)',
+                animation: 'hqFadeIn 0.3s ease',
               }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
-              </svg>
-            </span>
-            <input
-              id="telegram-id"
-              type="text"
-              inputMode="text"
-              autoComplete="off"
-              placeholder="Enter your @Nickname from the Telegram"
-              value={telegramId}
-              onChange={(e) => setTelegramId(e.target.value.replace(/[^a-zA-Z0-9_@]/g, ''))}
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                padding: '13px 14px 13px 40px',
-                borderRadius: 12,
-                border: '1px solid rgba(48, 54, 61, 0.9)',
-                background: '#0d1117',
-                color: 'var(--hq-text)',
-                fontSize: 15,
-                fontFamily: 'var(--hq-font)',
-                outline: 'none',
-                transition: 'border-color 0.15s, box-shadow 0.15s',
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
-                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(46, 230, 197, 0.1)';
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(48, 54, 61, 0.9)';
-                e.currentTarget.style.boxShadow = 'none';
-              }}
-            />
-          </div>
-          <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--hq-muted)', lineHeight: 1.5 }}>
-            <span style={{ color: 'var(--hq-warn)', fontWeight: 600 }}>Note:</span> Enter your
-            Telegram @Nickname if you have an active paid subscription. Leave empty on the free
-            plan — a builder fee of <span style={{ color: 'var(--hq-accent)' }}>0.01%</span>{' '}
-            applies (up to <span style={{ color: 'var(--hq-accent)' }}>0.03%</span> for Quant Bot
-            on DEMO).
-          </p>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  color: 'var(--hq-dim)',
+                  marginBottom: 8,
+                }}
+              >
+                Subscription
+              </div>
+              <div
+                style={{
+                  fontSize: 18,
+                  fontWeight: 700,
+                  color: 'var(--hq-text)',
+                  letterSpacing: '-0.02em',
+                  lineHeight: 1.35,
+                }}
+              >
+                Free{' '}
+                <span style={{ color: 'var(--hq-dim)', fontWeight: 500 }}>+</span>{' '}
+                <span style={{ color: 'var(--hq-accent)' }}>Demo</span>
+              </div>
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 13,
+                  color: 'var(--hq-muted)',
+                  fontWeight: 500,
+                }}
+              >
+                7-day trial
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
