@@ -194,7 +194,7 @@ const FAQ_ITEMS: FaqItem[] = [
   },
 ];
 
-/** DCA (~0–45%) then Grid (~45–100%), loop 12s */
+/** DCA then Grid, loop 14s. Header: only "DCA" / "Grid". */
 function BotsDemo({ active }: { active: boolean }) {
   const [t, setT] = useState(0);
   const raf = useRef(0);
@@ -207,7 +207,7 @@ function BotsDemo({ active }: { active: boolean }) {
     }
     start.current = performance.now();
     const loop = (now: number) => {
-      setT(((now - start.current) % 12000) / 12000);
+      setT(((now - start.current) % 14000) / 14000);
       raf.current = requestAnimationFrame(loop);
     };
     raf.current = requestAnimationFrame(loop);
@@ -215,16 +215,16 @@ function BotsDemo({ active }: { active: boolean }) {
   }, [active]);
 
   const W = 300;
-  const H = 140;
+  const H = 150;
   const padX = 10;
-  const padY = 12;
+  const padY = 14;
   const cW = W - padX * 2;
   const cH = H - padY * 2;
 
-  const dcaPhase = t < 0.45;
-  const u = dcaPhase ? t / 0.45 : (t - 0.45) / 0.55;
+  const dcaPhase = t < 0.42;
+  const u = dcaPhase ? t / 0.42 : (t - 0.42) / 0.58;
 
-  // DCA: price path goes exactly through buy prices
+  // ——— DCA ———
   const dcaBuyTimes = [0.15, 0.32, 0.48];
   const dcaBuyPrices = [0.32, 0.48, 0.64];
 
@@ -255,39 +255,74 @@ function BotsDemo({ active }: { active: boolean }) {
   const tpY = Math.max(0.1, avgY - 0.2);
   const tpHit = filledDca.length >= 3 && u >= 0.78 && dcaPrice(u) <= tpY + 0.03;
 
-  // Grid: 3 buys → on fill each becomes sell above; remaining buys shift slightly
-  const initialBuys = [0.5, 0.61, 0.72];
-  const buyFillTimes = [0.18, 0.32, 0.48];
-  const sellOffset = 0.14;
-
+  // ——— Grid: buy fill → sell above → sell fill → buy below again ———
   const gridPrice = (x: number) => {
-    if (x < 0.55) return 0.38 + x * 0.55;
-    const k = (x - 0.55) / 0.45;
-    return 0.38 + 0.55 * 0.55 - k * 0.32;
+    if (x < 0.35) return 0.36 + (x / 0.35) * 0.4;
+    if (x < 0.7) {
+      const k = (x - 0.35) / 0.35;
+      return 0.76 - k * 0.42;
+    }
+    const k = (x - 0.7) / 0.3;
+    return 0.34 + k * 0.2;
   };
 
-  type GLevel = { y: number; kind: 'buy' | 'sell' };
-  const gridLevels: GLevel[] = [];
-  buyFillTimes.forEach((ft, i) => {
-    const earlierFills = buyFillTimes.filter((t0, j) => j < i && u >= t0).length;
-    const shift = earlierFills * 0.04;
-    const buyY = initialBuys[i] - shift;
-    if (u < ft) {
-      gridLevels.push({ y: buyY, kind: 'buy' });
+  const spacing = 0.12;
+  const base = 0.44;
+  const buyFillAt = [0.12, 0.22, 0.32];
+  const sellFillAt = [0.42, 0.52, 0.62];
+
+  type GLevel = { y: number; kind: 'buy' | 'sell'; flash?: boolean };
+  const levels: GLevel[] = [];
+
+  for (let i = 0; i < 3; i++) {
+    const buyY = base + i * spacing;
+    const sellY = buyY - spacing;
+    const buyFilled = u >= buyFillAt[i];
+    const sellFilled = u >= sellFillAt[i];
+
+    if (!buyFilled) {
+      levels.push({
+        y: buyY,
+        kind: 'buy',
+        flash: u >= buyFillAt[i] - 0.03 && u < buyFillAt[i],
+      });
+    } else if (!sellFilled) {
+      levels.push({
+        y: sellY,
+        kind: 'sell',
+        flash: u >= sellFillAt[i] - 0.03 && u < sellFillAt[i],
+      });
     } else {
-      gridLevels.push({ y: buyY - sellOffset, kind: 'sell' });
+      levels.push({
+        y: buyY + 0.03,
+        kind: 'buy',
+      });
     }
-  });
+  }
 
   const priceFn = dcaPhase ? dcaPrice : gridPrice;
   const maxX = Math.max(0.02, u);
   const pts: string[] = [];
-  for (let i = 0; i <= 70; i++) {
-    const x = (i / 70) * maxX;
+  for (let i = 0; i <= 80; i++) {
+    const x = (i / 80) * maxX;
     pts.push(`${padX + x * cW},${padY + priceFn(x) * cH}`);
   }
   const cx = padX + u * cW;
   const cy = padY + priceFn(u) * cH;
+
+  const fillMarkers: { x: number; y: number; kind: 'buy' | 'sell' }[] = [];
+  if (!dcaPhase) {
+    buyFillAt.forEach((ft) => {
+      if (u >= ft && u < ft + 0.06) {
+        fillMarkers.push({ x: ft, y: gridPrice(ft), kind: 'buy' });
+      }
+    });
+    sellFillAt.forEach((ft) => {
+      if (u >= ft && u < ft + 0.06) {
+        fillMarkers.push({ x: ft, y: gridPrice(ft), kind: 'sell' });
+      }
+    });
+  }
 
   return (
     <div
@@ -302,23 +337,22 @@ function BotsDemo({ active }: { active: boolean }) {
       <div
         style={{
           display: 'flex',
-          justifyContent: 'space-between',
+          justifyContent: 'center',
           padding: '8px 12px',
           borderBottom: '1px solid #21262d',
         }}
       >
         <span
           style={{
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: 700,
-            letterSpacing: '0.05em',
+            letterSpacing: '0.08em',
             textTransform: 'uppercase',
             color: '#2ee6c5',
           }}
         >
-          {dcaPhase ? 'DCA · averaging + TP' : 'Grid · 3 buys → sells'}
+          {dcaPhase ? 'DCA' : 'Grid'}
         </span>
-        <span style={{ fontSize: 10, color: '#6e7681' }}>demo</span>
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
         {[0.25, 0.5, 0.75].map((g) => (
@@ -403,16 +437,24 @@ function BotsDemo({ active }: { active: boolean }) {
         )}
 
         {!dcaPhase &&
-          gridLevels.map((lv, i) => (
+          levels.map((lv, i) => (
             <g key={i}>
               <line
                 x1={padX}
                 x2={W - padX}
                 y1={padY + lv.y * cH}
                 y2={padY + lv.y * cH}
-                stroke={lv.kind === 'buy' ? 'rgba(46,230,197,0.55)' : 'rgba(248,81,73,0.5)'}
+                stroke={
+                  lv.kind === 'buy'
+                    ? lv.flash
+                      ? 'rgba(46,230,197,0.95)'
+                      : 'rgba(46,230,197,0.5)'
+                    : lv.flash
+                      ? 'rgba(248,81,73,0.95)'
+                      : 'rgba(248,81,73,0.5)'
+                }
                 strokeDasharray="4 3"
-                strokeWidth={1.5}
+                strokeWidth={lv.flash ? 2 : 1.5}
               />
               <text
                 x={padX + 2}
@@ -427,17 +469,16 @@ function BotsDemo({ active }: { active: boolean }) {
           ))}
 
         {!dcaPhase &&
-          buyFillTimes.map((ft, i) =>
-            u >= ft && u < ft + 0.08 ? (
-              <circle
-                key={`f${i}`}
-                cx={padX + ft * cW}
-                cy={padY + gridPrice(ft) * cH}
-                r={4}
-                fill="#2ee6c5"
-              />
-            ) : null
-          )}
+          fillMarkers.map((m, i) => (
+            <circle
+              key={i}
+              cx={padX + m.x * cW}
+              cy={padY + m.y * cH}
+              r={5}
+              fill={m.kind === 'buy' ? '#2ee6c5' : '#f85149'}
+              opacity={0.9}
+            />
+          ))}
 
         <polyline
           points={pts.join(' ')}
@@ -765,7 +806,6 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [statusWarn, setStatusWarn] = useState(false);
-  /** After successful activation in this browser session — gray until reload */
   const [sessionDone, setSessionDone] = useState(false);
   const [accountInfo, setAccountInfo] = useState<AccountInfo>({
     balance: null,
@@ -875,7 +915,6 @@ export default function Home() {
       const builderNonce = agentNonce + 1;
       const abstractionNonce = agentNonce + 2;
 
-      // 1/3 Agent
       stage = 'agent_sign';
       setStatus('Sign agent approval in your wallet (1/3)...');
       const agentAction = {
@@ -915,7 +954,6 @@ export default function Home() {
       setStatus('Agent registered. Updating status...');
       await fetchAccountInfo(address);
 
-      // 2/3 Builder
       stage = 'builder_sign';
       setStatus('Sign builder fee approval in your wallet (2/3)...');
       const builderAction = {
@@ -964,7 +1002,6 @@ export default function Home() {
       setStatus('Builder fee registered. Updating status...');
       await fetchAccountInfo(address);
 
-      // 3/3 Abstraction
       stage = 'abstraction_sign';
       setStatus('Sign unified account abstraction in your wallet (3/3)...');
       const abstractionAction = {
@@ -1017,7 +1054,6 @@ export default function Home() {
       setStatus('Abstraction set. Updating status...');
       await fetchAccountInfo(address);
 
-      // Save always
       stage = 'save';
       setStatus('Saving data...');
       const res = await fetch('/api/activate', {
@@ -1083,8 +1119,6 @@ export default function Home() {
     accountInfo.balance !== null && accountInfo.balance < MIN_BALANCE_USD;
   const agentOk = !!accountInfo.agent;
   const abstractionOk = isAbstractionOk(accountInfo.abstraction);
-
-  // Always clickable until success in this session (independent of table status)
   const activateDisabled = loading || sessionDone;
 
   return (
