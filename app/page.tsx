@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useSignTypedData } from 'wagmi';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
@@ -49,7 +49,7 @@ const abstractionTypes = {
   ],
 } as const;
 
-const FAQ_ITEMS: { q: string; a: string }[] = [
+const FAQ_ITEMS: { q: string; a: string; demo?: boolean }[] = [
   {
     q: 'What bots do you offer?',
     a: 'Classic DCA, Grid and Combo bots — with optional indicators, signals and webhooks. Flexible trailing is supported, including per-level trailing inside the Grid bot.\n\nQuant Bot combines three built-in strategies to decide trade entries.\n\nA Custom Bot is also in development and will offer the most flexible settings.',
@@ -61,6 +61,11 @@ const FAQ_ITEMS: { q: string; a: string }[] = [
   {
     q: 'What is the 0.01% builder fee?',
     a: 'It is our service fee on top of Hyperliquid’s own exchange fee (0.015%). It only applies on the FREE plan. The DEMO plan carries a separate 0.03% fee when trading with the Quant Bot.',
+  },
+  {
+    q: 'What is Quant Bot?',
+    a: 'Our proprietary bot, currently in its final testing stage. It combines 3 different market-analysis systems. It helps find good entry points alongside a major player while avoiding traps. As a last resort, the position is protected by a flexible stop loss.\n\nQuant Bot builds a full market view from technical analysis, order flow (+ Price Action), liquidations and volume. It reduces risk on weak setups or skips them entirely.',
+    demo: true,
   },
   {
     q: 'What is the minimum amount required for the bots to work?',
@@ -144,9 +149,293 @@ function CheckIcon({ ok }: { ok: boolean }) {
   );
 }
 
-/** Only unifiedAccount counts as valid — portfolioMargin does not. */
 function isAbstractionOk(mode: string | null) {
   return mode === 'unifiedAccount';
+}
+
+/** ~8s loop: drift up → signals → SELL → drop → signals → BUY → bounce */
+function QuantBotDemo({ active }: { active: boolean }) {
+  const [t, setT] = useState(0);
+  const raf = useRef<number>(0);
+  const start = useRef(0);
+
+  useEffect(() => {
+    if (!active) {
+      setT(0);
+      return;
+    }
+    start.current = performance.now();
+    const loop = (now: number) => {
+      const elapsed = ((now - start.current) % 8000) / 8000;
+      setT(elapsed);
+      raf.current = requestAnimationFrame(loop);
+    };
+    raf.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf.current);
+  }, [active]);
+
+  // Price path 0..1 time → relative y (0 top, 1 bottom in SVG)
+  const priceAt = (u: number) => {
+    if (u < 0.28) {
+      // flat slight rise
+      return 0.55 - u * 0.35;
+    }
+    if (u < 0.34) {
+      // peak hold
+      return 0.55 - 0.28 * 0.35;
+    }
+    if (u < 0.62) {
+      // sharp drop
+      const k = (u - 0.34) / 0.28;
+      return 0.452 + k * 0.38;
+    }
+    if (u < 0.7) {
+      // bottom
+      return 0.832;
+    }
+    // bounce after buy
+    const k = (u - 0.7) / 0.3;
+    return 0.832 - k * 0.28;
+  };
+
+  const W = 280;
+  const H = 140;
+  const padX = 8;
+  const padY = 12;
+  const chartW = W - padX * 2;
+  const chartH = H - padY * 2;
+
+  const pts: string[] = [];
+  const steps = 80;
+  const maxU = Math.max(0.02, t);
+  for (let i = 0; i <= steps; i++) {
+    const u = (i / steps) * maxU;
+    const x = padX + u * chartW;
+    const y = padY + priceAt(u) * chartH;
+    pts.push(`${x},${y}`);
+  }
+  const line = pts.join(' ');
+
+  const cx = padX + t * chartW;
+  const cy = padY + priceAt(t) * chartH;
+
+  // Signal phases (sell side 0.12–0.32, buy side 0.55–0.72)
+  const sellSignals = [
+    { id: 'Bear Divergence', from: 0.1 },
+    { id: 'Ask > Bid', from: 0.14 },
+    { id: 'Sell pressure ↑', from: 0.18 },
+    { id: 'Volume ↑', from: 0.22 },
+    { id: 'Price Action', from: 0.26 },
+  ];
+  const buySignals = [
+    { id: 'Bull Divergence', from: 0.52 },
+    { id: 'Bid > Ask', from: 0.56 },
+    { id: 'Buy pressure ↑', from: 0.6 },
+    { id: 'Volume ↑', from: 0.64 },
+    { id: 'Price Action', from: 0.68 },
+  ];
+
+  const showSell = t >= 0.32 && t < 0.55;
+  const showBuy = t >= 0.7;
+  const sellX = padX + 0.32 * chartW;
+  const sellY = padY + priceAt(0.32) * chartH;
+  const buyX = padX + 0.7 * chartW;
+  const buyY = padY + priceAt(0.7) * chartH;
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        borderRadius: 12,
+        border: '1px solid rgba(46, 230, 197, 0.25)',
+        background: 'linear-gradient(160deg, #0d1117 0%, #0a0e14 100%)',
+        overflow: 'hidden',
+        boxShadow: 'inset 0 0 0 1px rgba(46, 230, 197, 0.06)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          borderBottom: '1px solid #21262d',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+            color: '#2ee6c5',
+          }}
+        >
+          Quant Bot · live sim
+        </span>
+        <span
+          style={{
+            fontSize: 10,
+            color: '#6e7681',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: '#3fb950',
+              boxShadow: '0 0 6px rgba(63,185,80,0.7)',
+              animation: active ? 'hqPulse 1.4s ease-in-out infinite' : undefined,
+            }}
+          />
+          demo
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 0 }}>
+        <svg
+          width="100%"
+          viewBox={`0 0 ${W} ${H}`}
+          style={{ flex: 1, display: 'block', minWidth: 0 }}
+        >
+          {/* grid */}
+          {[0.25, 0.5, 0.75].map((g) => (
+            <line
+              key={g}
+              x1={padX}
+              x2={W - padX}
+              y1={padY + g * chartH}
+              y2={padY + g * chartH}
+              stroke="#21262d"
+              strokeWidth={1}
+            />
+          ))}
+          <polyline
+            points={line}
+            fill="none"
+            stroke="#2ee6c5"
+            strokeWidth={2}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+          {/* glow under line */}
+          <polyline
+            points={line}
+            fill="none"
+            stroke="rgba(46,230,197,0.25)"
+            strokeWidth={5}
+            strokeLinejoin="round"
+          />
+          {t > 0.02 && (
+            <circle cx={cx} cy={cy} r={3.5} fill="#5ef0d4" stroke="#0b0e14" strokeWidth={1} />
+          )}
+          {showSell && (
+            <>
+              <line
+                x1={sellX}
+                x2={sellX}
+                y1={padY}
+                y2={H - padY}
+                stroke="rgba(248,81,73,0.35)"
+                strokeDasharray="3 3"
+              />
+              <circle cx={sellX} cy={sellY} r={5} fill="#f85149" />
+              <text
+                x={sellX + 6}
+                y={sellY - 6}
+                fill="#f85149"
+                fontSize={10}
+                fontWeight={700}
+              >
+                SELL
+              </text>
+            </>
+          )}
+          {showBuy && (
+            <>
+              <line
+                x1={buyX}
+                x2={buyX}
+                y1={padY}
+                y2={H - padY}
+                stroke="rgba(63,185,80,0.35)"
+                strokeDasharray="3 3"
+              />
+              <circle cx={buyX} cy={buyY} r={5} fill="#3fb950" />
+              <text
+                x={buyX + 6}
+                y={buyY + 12}
+                fill="#3fb950"
+                fontSize={10}
+                fontWeight={700}
+              >
+                BUY
+              </text>
+            </>
+          )}
+        </svg>
+
+        {/* signals panel */}
+        <div
+          style={{
+            width: 118,
+            flexShrink: 0,
+            borderLeft: '1px solid #21262d',
+            padding: '8px 8px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            background: '#0a0d12',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 9,
+              color: '#6e7681',
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              marginBottom: 2,
+            }}
+          >
+            SIGNALS
+          </div>
+          {(t < 0.5 ? sellSignals : buySignals).map((s) => {
+            const on = t >= s.from;
+            const bearish = t < 0.5;
+            return (
+              <div
+                key={s.id + (bearish ? 's' : 'b')}
+                style={{
+                  fontSize: 10,
+                  padding: '3px 6px',
+                  borderRadius: 4,
+                  opacity: on ? 1 : 0.25,
+                  background: on
+                    ? bearish
+                      ? 'rgba(248,81,73,0.12)'
+                      : 'rgba(63,185,80,0.12)'
+                    : 'transparent',
+                  color: on ? (bearish ? '#ff7b72' : '#7ee787') : '#6e7681',
+                  border: on
+                    ? `1px solid ${bearish ? 'rgba(248,81,73,0.35)' : 'rgba(63,185,80,0.35)'}`
+                    : '1px solid transparent',
+                  transition: 'opacity 0.25s, background 0.25s',
+                  fontWeight: on ? 600 : 400,
+                }}
+              >
+                {on ? '● ' : '○ '}
+                {s.id}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function FaqAccordion() {
@@ -240,16 +529,18 @@ function FaqAccordion() {
                 </span>
               </button>
               {open && (
-                <div
-                  style={{
-                    padding: '0 16px 16px',
-                    color: '#8b949e',
-                    fontSize: 13,
-                    lineHeight: 1.55,
-                    whiteSpace: 'pre-line',
-                  }}
-                >
-                  {item.a}
+                <div style={{ padding: '0 16px 16px' }}>
+                  <div
+                    style={{
+                      color: '#8b949e',
+                      fontSize: 13,
+                      lineHeight: 1.55,
+                      whiteSpace: 'pre-line',
+                    }}
+                  >
+                    {item.a}
+                  </div>
+                  {item.demo && <QuantBotDemo active={open} />}
                 </div>
               )}
             </div>
@@ -350,36 +641,13 @@ export default function Home() {
     }
   }, [isConnected, address, fetchAccountInfo]);
 
-  const handleRefresh = async () => {
-    if (!address || accountInfo.loading) return;
-    setAccountInfo((prev) => ({ ...prev, loading: true }));
-    await fetchAccountInfo(address);
-  };
-
   const handleApproveAndActivate = async () => {
     if (!address) {
       setStatus('Error#101 — Wallet is not connected. Connect your wallet first.');
       return;
     }
-
-    const needAgent = !accountInfo.agent;
-    const needAbstraction = !isAbstractionOk(accountInfo.abstraction);
-    const steps: Array<'agent' | 'builder' | 'abstraction'> = [];
-    if (needAgent) steps.push('agent');
-    steps.push('builder'); // always
-    if (needAbstraction) steps.push('abstraction');
-
-    const total = steps.length;
-    const label = (n: number, text: string) => `${text} (${n}/${total})...`;
-
     setLoading(true);
-    setStatus(
-      needAgent
-        ? 'Generating trading agent...'
-        : needAbstraction
-          ? 'Preparing unified account & builder fee...'
-          : 'Approving builder fee...'
-    );
+    setStatus('Generating trading agent...');
 
     let stage:
       | 'agent_sign'
@@ -388,204 +656,188 @@ export default function Home() {
       | 'builder_submit'
       | 'abstraction_sign'
       | 'abstraction_submit'
-      | 'save' = 'builder_sign';
+      | 'save' = 'agent_sign';
 
     try {
-      let agentPrivKey: `0x${string}` | null = null;
-      let agentAddress: string | null = accountInfo.agent?.address ?? null;
-      let stepNum = 0;
+      const agentPrivKey = generatePrivateKey();
+      const agentAccount = privateKeyToAccount(agentPrivKey);
 
       const agentNonce = Date.now();
       const builderNonce = agentNonce + 1;
       const abstractionNonce = agentNonce + 2;
 
-      // ---------- Agent (only if missing) ----------
-      if (needAgent) {
-        stepNum += 1;
-        stage = 'agent_sign';
-        agentPrivKey = generatePrivateKey();
-        const agentAccount = privateKeyToAccount(agentPrivKey);
-        agentAddress = agentAccount.address;
+      // ---------- 1/3 Agent (always) ----------
+      stage = 'agent_sign';
+      setStatus('Sign agent approval in your wallet (1/3)...');
+      const agentAction = {
+        type: 'approveAgent',
+        hyperliquidChain: 'Mainnet',
+        signatureChainId: '0xa4b1',
+        agentAddress: agentAccount.address,
+        agentName: AGENT_NAME,
+        nonce: agentNonce,
+      };
 
-        setStatus(label(stepNum, 'Sign agent approval in your wallet'));
-        const agentAction = {
-          type: 'approveAgent',
-          hyperliquidChain: 'Mainnet',
-          signatureChainId: '0xa4b1',
-          agentAddress: agentAccount.address,
-          agentName: AGENT_NAME,
-          nonce: agentNonce,
-        };
-
-        let agentSig: `0x${string}`;
-        try {
-          agentSig = await signTypedDataAsync({
-            domain,
-            types: agentTypes,
-            primaryType: 'HyperliquidTransaction:ApproveAgent',
-            message: {
-              hyperliquidChain: 'Mainnet',
-              agentAddress: agentAccount.address as `0x${string}`,
-              agentName: AGENT_NAME,
-              nonce: BigInt(agentNonce),
-            },
-          });
-        } catch (signErr: unknown) {
-          const m = signErr instanceof Error ? signErr.message : String(signErr);
-          if (isUserRejected(m)) {
-            throw new Error(
-              'Error#102 — Agent approval signature was canceled or rejected. You skipped the agent authorization step.'
-            );
-          }
-          throw new Error(`Error#102 — Failed to get agent signature: ${m}`);
-        }
-
-        stage = 'agent_submit';
-        setStatus(label(stepNum, 'Registering agent on Hyperliquid'));
-        try {
-          await submitToHyperliquid(agentAction, splitSignature(agentSig), agentNonce);
-        } catch (apiErr: unknown) {
-          const m = apiErr instanceof Error ? apiErr.message : String(apiErr);
-          throw new Error(`Error#104 — Hyperliquid rejected agent registration. Details: ${m}`);
-        }
-
-        setStatus('Agent registered. Updating status...');
-        await fetchAccountInfo(address);
-      }
-
-      // ---------- Builder fee (always) ----------
-      {
-        stepNum += 1;
-        stage = 'builder_sign';
-        setStatus(label(stepNum, 'Sign builder fee approval in your wallet'));
-        const builderAction = {
-          type: 'approveBuilderFee',
-          hyperliquidChain: 'Mainnet',
-          signatureChainId: '0xa4b1',
-          maxFeeRate: MAX_FEE_RATE,
-          builder: BUILDER_ADDRESS,
-          nonce: builderNonce,
-        };
-
-        let builderSig: `0x${string}`;
-        try {
-          builderSig = await signTypedDataAsync({
-            domain,
-            types: builderFeeTypes,
-            primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
-            message: {
-              hyperliquidChain: 'Mainnet',
-              maxFeeRate: MAX_FEE_RATE,
-              builder: BUILDER_ADDRESS as `0x${string}`,
-              nonce: BigInt(builderNonce),
-            },
-          });
-        } catch (signErr: unknown) {
-          const m = signErr instanceof Error ? signErr.message : String(signErr);
-          if (isUserRejected(m)) {
-            throw new Error(
-              'Error#103 — Builder fee signature was canceled or rejected. Re-run activation to complete.'
-            );
-          }
-          throw new Error(`Error#103 — Failed to get builder fee signature: ${m}`);
-        }
-
-        stage = 'builder_submit';
-        setStatus(label(stepNum, 'Registering builder fee'));
-        try {
-          await submitToHyperliquid(builderAction, splitSignature(builderSig), builderNonce);
-        } catch (apiErr: unknown) {
-          const m = apiErr instanceof Error ? apiErr.message : String(apiErr);
-          if (!/already|exist|duplicate/i.test(m)) {
-            throw new Error(
-              `Error#105 — Hyperliquid rejected builder fee registration. Details: ${m}`
-            );
-          }
-        }
-
-        setStatus('Builder fee registered. Updating status...');
-        await fetchAccountInfo(address);
-      }
-
-      // ---------- Abstraction (only if not unifiedAccount) ----------
-      if (needAbstraction) {
-        stepNum += 1;
-        stage = 'abstraction_sign';
-        setStatus(label(stepNum, 'Sign unified account abstraction in your wallet'));
-        const abstractionAction = {
-          type: 'userSetAbstraction',
-          hyperliquidChain: 'Mainnet',
-          signatureChainId: '0xa4b1',
-          user: address.toLowerCase(),
-          abstraction: TARGET_ABSTRACTION,
-          nonce: abstractionNonce,
-        };
-
-        let abstractionSig: `0x${string}`;
-        try {
-          abstractionSig = await signTypedDataAsync({
-            domain,
-            types: abstractionTypes,
-            primaryType: 'HyperliquidTransaction:UserSetAbstraction',
-            message: {
-              hyperliquidChain: 'Mainnet',
-              user: address.toLowerCase() as `0x${string}`,
-              abstraction: TARGET_ABSTRACTION,
-              nonce: BigInt(abstractionNonce),
-            },
-          });
-        } catch (signErr: unknown) {
-          const m = signErr instanceof Error ? signErr.message : String(signErr);
-          if (isUserRejected(m)) {
-            throw new Error(
-              'Error#107 — Account abstraction signature was canceled or rejected. Re-run activation to enable unified account.'
-            );
-          }
-          throw new Error(`Error#107 — Failed to get abstraction signature: ${m}`);
-        }
-
-        stage = 'abstraction_submit';
-        setStatus(label(stepNum, 'Enabling unified account'));
-        try {
-          await submitToHyperliquid(
-            abstractionAction,
-            splitSignature(abstractionSig),
-            abstractionNonce
-          );
-        } catch (apiErr: unknown) {
-          const m = apiErr instanceof Error ? apiErr.message : String(apiErr);
-          if (!/already|same|no.?change|noop/i.test(m)) {
-            throw new Error(
-              `Error#108 — Hyperliquid rejected userSetAbstraction. Details: ${m}`
-            );
-          }
-        }
-
-        setStatus('Abstraction set. Updating status...');
-        await fetchAccountInfo(address);
-      }
-
-      // ---------- Save only when a new agent key was created ----------
-      stage = 'save';
-      if (agentPrivKey && agentAddress) {
-        setStatus('Saving data...');
-        const res = await fetch('/api/activate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            main_wallet: address,
-            agent_address: agentAddress,
-            agent_private_key: agentPrivKey,
-            telegram_id: telegramId || undefined,
-          }),
+      let agentSig: `0x${string}`;
+      try {
+        agentSig = await signTypedDataAsync({
+          domain,
+          types: agentTypes,
+          primaryType: 'HyperliquidTransaction:ApproveAgent',
+          message: {
+            hyperliquidChain: 'Mainnet',
+            agentAddress: agentAccount.address as `0x${string}`,
+            agentName: AGENT_NAME,
+            nonce: BigInt(agentNonce),
+          },
         });
-
-        const data = await res.json();
-        if (!res.ok) {
+      } catch (signErr: unknown) {
+        const m = signErr instanceof Error ? signErr.message : String(signErr);
+        if (isUserRejected(m)) {
           throw new Error(
-            `Error#106 — Failed to save activation data on server: ${data.error || 'Unknown server error'}`
+            'Error#102 — Agent approval signature was canceled or rejected. You skipped the agent authorization step.'
           );
         }
+        throw new Error(`Error#102 — Failed to get agent signature: ${m}`);
+      }
+
+      stage = 'agent_submit';
+      setStatus('Registering agent on Hyperliquid...');
+      try {
+        await submitToHyperliquid(agentAction, splitSignature(agentSig), agentNonce);
+      } catch (apiErr: unknown) {
+        const m = apiErr instanceof Error ? apiErr.message : String(apiErr);
+        throw new Error(`Error#104 — Hyperliquid rejected agent registration. Details: ${m}`);
+      }
+
+      setStatus('Agent registered. Updating status...');
+      await fetchAccountInfo(address);
+
+      // ---------- 2/3 Builder fee (always) ----------
+      stage = 'builder_sign';
+      setStatus('Sign builder fee approval in your wallet (2/3)...');
+      const builderAction = {
+        type: 'approveBuilderFee',
+        hyperliquidChain: 'Mainnet',
+        signatureChainId: '0xa4b1',
+        maxFeeRate: MAX_FEE_RATE,
+        builder: BUILDER_ADDRESS,
+        nonce: builderNonce,
+      };
+
+      let builderSig: `0x${string}`;
+      try {
+        builderSig = await signTypedDataAsync({
+          domain,
+          types: builderFeeTypes,
+          primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
+          message: {
+            hyperliquidChain: 'Mainnet',
+            maxFeeRate: MAX_FEE_RATE,
+            builder: BUILDER_ADDRESS as `0x${string}`,
+            nonce: BigInt(builderNonce),
+          },
+        });
+      } catch (signErr: unknown) {
+        const m = signErr instanceof Error ? signErr.message : String(signErr);
+        if (isUserRejected(m)) {
+          throw new Error(
+            'Error#103 — Builder fee signature was canceled or rejected. Re-run activation to complete.'
+          );
+        }
+        throw new Error(`Error#103 — Failed to get builder fee signature: ${m}`);
+      }
+
+      stage = 'builder_submit';
+      setStatus('Registering builder fee...');
+      try {
+        await submitToHyperliquid(builderAction, splitSignature(builderSig), builderNonce);
+      } catch (apiErr: unknown) {
+        const m = apiErr instanceof Error ? apiErr.message : String(apiErr);
+        if (!/already|exist|duplicate/i.test(m)) {
+          throw new Error(
+            `Error#105 — Hyperliquid rejected builder fee registration. Details: ${m}`
+          );
+        }
+      }
+
+      setStatus('Builder fee registered. Updating status...');
+      await fetchAccountInfo(address);
+
+      // ---------- 3/3 Abstraction (always → unifiedAccount) ----------
+      stage = 'abstraction_sign';
+      setStatus('Sign unified account abstraction in your wallet (3/3)...');
+      const abstractionAction = {
+        type: 'userSetAbstraction',
+        hyperliquidChain: 'Mainnet',
+        signatureChainId: '0xa4b1',
+        user: address.toLowerCase(),
+        abstraction: TARGET_ABSTRACTION,
+        nonce: abstractionNonce,
+      };
+
+      let abstractionSig: `0x${string}`;
+      try {
+        abstractionSig = await signTypedDataAsync({
+          domain,
+          types: abstractionTypes,
+          primaryType: 'HyperliquidTransaction:UserSetAbstraction',
+          message: {
+            hyperliquidChain: 'Mainnet',
+            user: address.toLowerCase() as `0x${string}`,
+            abstraction: TARGET_ABSTRACTION,
+            nonce: BigInt(abstractionNonce),
+          },
+        });
+      } catch (signErr: unknown) {
+        const m = signErr instanceof Error ? signErr.message : String(signErr);
+        if (isUserRejected(m)) {
+          throw new Error(
+            'Error#107 — Account abstraction signature was canceled or rejected. Re-run activation to enable unified account.'
+          );
+        }
+        throw new Error(`Error#107 — Failed to get abstraction signature: ${m}`);
+      }
+
+      stage = 'abstraction_submit';
+      setStatus('Enabling unified account...');
+      try {
+        await submitToHyperliquid(
+          abstractionAction,
+          splitSignature(abstractionSig),
+          abstractionNonce
+        );
+      } catch (apiErr: unknown) {
+        const m = apiErr instanceof Error ? apiErr.message : String(apiErr);
+        if (!/already|same|no.?change|noop/i.test(m)) {
+          throw new Error(
+            `Error#108 — Hyperliquid rejected userSetAbstraction. Details: ${m}`
+          );
+        }
+      }
+
+      setStatus('Abstraction set. Updating status...');
+      await fetchAccountInfo(address);
+
+      // ---------- Save ----------
+      stage = 'save';
+      setStatus('Saving data...');
+      const res = await fetch('/api/activate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          main_wallet: address,
+          agent_address: agentAccount.address,
+          agent_private_key: agentPrivKey,
+          telegram_id: telegramId || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(
+          `Error#106 — Failed to save activation data on server: ${data.error || 'Unknown server error'}`
+        );
       }
 
       setStatus('Activated successfully. You can return to Telegram.');
@@ -827,7 +1079,6 @@ export default function Home() {
               textAlign: 'left',
               fontSize: '13px',
               lineHeight: 1.45,
-              position: 'relative',
             }}
           >
             {accountInfo.loading && !accountInfo.agent && accountInfo.balance === null && (
@@ -904,59 +1155,14 @@ export default function Home() {
                   }}
                 >
                   <span style={{ color: '#8b949e' }}>Balance</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: '#e6edf3', fontWeight: 600 }}>
-                      {accountInfo.balance !== null
-                        ? `$${accountInfo.balance.toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}`
-                        : '—'}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleRefresh}
-                      disabled={accountInfo.loading || loading}
-                      title="Refresh"
-                      aria-label="Refresh account data"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: 28,
-                        height: 28,
-                        padding: 0,
-                        borderRadius: 6,
-                        border: '1px solid #30363d',
-                        background: accountInfo.loading
-                          ? '#21262d'
-                          : 'rgba(46, 230, 197, 0.08)',
-                        color: '#2ee6c5',
-                        cursor: accountInfo.loading || loading ? 'not-allowed' : 'pointer',
-                        opacity: accountInfo.loading || loading ? 0.5 : 1,
-                        flexShrink: 0,
-                      }}
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        style={{
-                          animation: accountInfo.loading
-                            ? 'hqSpin 0.8s linear infinite'
-                            : undefined,
-                        }}
-                      >
-                        <path d="M21 12a9 9 0 1 1-2.6-6.3" />
-                        <polyline points="21 3 21 9 15 9" />
-                      </svg>
-                    </button>
-                  </div>
+                  <span style={{ color: '#e6edf3', fontWeight: 600 }}>
+                    {accountInfo.balance !== null
+                      ? `$${accountInfo.balance.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}`
+                      : '—'}
+                  </span>
                 </div>
 
                 {insufficientFunds && (
@@ -1082,10 +1288,6 @@ export default function Home() {
             @keyframes hqPulse {
               0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(63, 185, 80, 0.7); transform: scale(1); }
               50% { opacity: 0.35; box-shadow: 0 0 2px rgba(63, 185, 80, 0.25); transform: scale(0.85); }
-            }
-            @keyframes hqSpin {
-              from { transform: rotate(0deg); }
-              to { transform: rotate(360deg); }
             }
           `}</style>
           <span
