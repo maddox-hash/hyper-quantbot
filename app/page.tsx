@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useSignTypedData } from 'wagmi';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
@@ -48,12 +48,6 @@ const abstractionTypes = {
     { name: 'nonce', type: 'uint64' },
   ],
 } as const;
-
-type FaqItem = {
-  q: string;
-  a?: React.ReactNode;
-  demo?: 'quant' | 'bots';
-};
 
 function splitSignature(signature: `0x${string}`) {
   return {
@@ -135,6 +129,12 @@ const hl = (text: string) => (
   <span style={{ color: '#2ee6c5', fontWeight: 700 }}>{text}</span>
 );
 
+type FaqItem = {
+  q: string;
+  a: ReactNode;
+  demo?: 'quant' | 'bots';
+};
+
 const FAQ_ITEMS: FaqItem[] = [
   {
     q: 'What bots do you offer?',
@@ -166,7 +166,6 @@ const FAQ_ITEMS: FaqItem[] = [
             background: 'rgba(46, 230, 197, 0.1)',
             borderLeft: '2px solid #2ee6c5',
             padding: '2px 8px',
-            display: 'inline',
             borderRadius: 4,
           }}
         >
@@ -195,7 +194,7 @@ const FAQ_ITEMS: FaqItem[] = [
   },
 ];
 
-/** DCA (~0–4s) then Grid (~4–10s), loop ~10s */
+/** DCA (~0–45%) then Grid (~45–100%), loop 12s */
 function BotsDemo({ active }: { active: boolean }) {
   const [t, setT] = useState(0);
   const raf = useRef(0);
@@ -208,7 +207,7 @@ function BotsDemo({ active }: { active: boolean }) {
     }
     start.current = performance.now();
     const loop = (now: number) => {
-      setT(((now - start.current) % 10000) / 10000);
+      setT(((now - start.current) % 12000) / 12000);
       raf.current = requestAnimationFrame(loop);
     };
     raf.current = requestAnimationFrame(loop);
@@ -216,61 +215,77 @@ function BotsDemo({ active }: { active: boolean }) {
   }, [active]);
 
   const W = 300;
-  const H = 130;
+  const H = 140;
   const padX = 10;
-  const padY = 14;
+  const padY = 12;
   const cW = W - padX * 2;
   const cH = H - padY * 2;
 
-  // Phase split
-  const dcaPhase = t < 0.42;
-  const u = dcaPhase ? t / 0.42 : (t - 0.42) / 0.58;
+  const dcaPhase = t < 0.45;
+  const u = dcaPhase ? t / 0.45 : (t - 0.45) / 0.55;
 
-  // --- DCA price: drift down with buys, then bounce to TP ---
+  // DCA: price path goes exactly through buy prices
+  const dcaBuyTimes = [0.15, 0.32, 0.48];
+  const dcaBuyPrices = [0.32, 0.48, 0.64];
+
   const dcaPrice = (x: number) => {
-    if (x < 0.55) return 0.28 + x * 0.55; // drop
-    const k = (x - 0.55) / 0.45;
-    return 0.28 + 0.55 * 0.55 - k * 0.42; // bounce
-  };
-
-  // DCA buys at 0.15, 0.3, 0.45 of phase; avg moves down
-  const dcaBuys = [0.12, 0.28, 0.42];
-  const filledBuys = dcaBuys.filter((b) => u >= b);
-  const avgY =
-    filledBuys.length === 0
-      ? dcaPrice(0)
-      : filledBuys.reduce((s, b) => s + dcaPrice(b), 0) / filledBuys.length;
-  // TP sits above avg (fixed offset in chart space)
-  const tpY = Math.max(0.08, avgY - 0.18);
-  const tpHit = u >= 0.72 && dcaPrice(u) <= tpY + 0.02;
-
-  // --- Grid: price mild wave, grid levels ---
-  const gridPrice = (x: number) => 0.45 + Math.sin(x * Math.PI * 2) * 0.18 + x * 0.05;
-  const gridBase = 0.55;
-  const spacing = 0.12;
-  // Buy levels below “center”, shift after fills
-  const shift = u > 0.35 ? spacing * 0.5 : 0;
-  const buyLevels = [gridBase + spacing, gridBase + spacing * 2, gridBase + spacing * 3].map(
-    (y) => y - shift
-  );
-  const sellLevels = [gridBase - spacing, gridBase - spacing * 2].map((y) => y - shift);
-
-  const modeLabel = dcaPhase ? 'DCA · averaging' : 'Grid · dynamic levels';
-
-  const drawLine = (priceFn: (x: number) => number, maxX: number) => {
-    const pts: string[] = [];
-    const n = 60;
-    for (let i = 0; i <= n; i++) {
-      const x = (i / n) * maxX;
-      const px = padX + x * cW;
-      const py = padY + priceFn(x) * cH;
-      pts.push(`${px},${py}`);
+    if (x < dcaBuyTimes[0]) {
+      return 0.22 + (x / dcaBuyTimes[0]) * (dcaBuyPrices[0] - 0.22);
     }
-    return pts.join(' ');
+    if (x < dcaBuyTimes[1]) {
+      const k = (x - dcaBuyTimes[0]) / (dcaBuyTimes[1] - dcaBuyTimes[0]);
+      return dcaBuyPrices[0] + k * (dcaBuyPrices[1] - dcaBuyPrices[0]);
+    }
+    if (x < dcaBuyTimes[2]) {
+      const k = (x - dcaBuyTimes[1]) / (dcaBuyTimes[2] - dcaBuyTimes[1]);
+      return dcaBuyPrices[1] + k * (dcaBuyPrices[2] - dcaBuyPrices[1]);
+    }
+    if (x < 0.62) return dcaBuyPrices[2];
+    const k = (x - 0.62) / 0.38;
+    return dcaBuyPrices[2] - k * 0.42;
   };
+
+  const filledDca = dcaBuyTimes
+    .map((bt, i) => ({ t: bt, y: dcaBuyPrices[i] }))
+    .filter((b) => u >= b.t);
+  const avgY =
+    filledDca.length === 0
+      ? dcaBuyPrices[0]
+      : filledDca.reduce((s, b) => s + b.y, 0) / filledDca.length;
+  const tpY = Math.max(0.1, avgY - 0.2);
+  const tpHit = filledDca.length >= 3 && u >= 0.78 && dcaPrice(u) <= tpY + 0.03;
+
+  // Grid: 3 buys → on fill each becomes sell above; remaining buys shift slightly
+  const initialBuys = [0.5, 0.61, 0.72];
+  const buyFillTimes = [0.18, 0.32, 0.48];
+  const sellOffset = 0.14;
+
+  const gridPrice = (x: number) => {
+    if (x < 0.55) return 0.38 + x * 0.55;
+    const k = (x - 0.55) / 0.45;
+    return 0.38 + 0.55 * 0.55 - k * 0.32;
+  };
+
+  type GLevel = { y: number; kind: 'buy' | 'sell' };
+  const gridLevels: GLevel[] = [];
+  buyFillTimes.forEach((ft, i) => {
+    const earlierFills = buyFillTimes.filter((t0, j) => j < i && u >= t0).length;
+    const shift = earlierFills * 0.04;
+    const buyY = initialBuys[i] - shift;
+    if (u < ft) {
+      gridLevels.push({ y: buyY, kind: 'buy' });
+    } else {
+      gridLevels.push({ y: buyY - sellOffset, kind: 'sell' });
+    }
+  });
 
   const priceFn = dcaPhase ? dcaPrice : gridPrice;
-  const line = drawLine(priceFn, Math.max(0.02, u));
+  const maxX = Math.max(0.02, u);
+  const pts: string[] = [];
+  for (let i = 0; i <= 70; i++) {
+    const x = (i / 70) * maxX;
+    pts.push(`${padX + x * cW},${padY + priceFn(x) * cH}`);
+  }
   const cx = padX + u * cW;
   const cy = padY + priceFn(u) * cH;
 
@@ -301,7 +316,7 @@ function BotsDemo({ active }: { active: boolean }) {
             color: '#2ee6c5',
           }}
         >
-          {modeLabel}
+          {dcaPhase ? 'DCA · averaging + TP' : 'Grid · 3 buys → sells'}
         </span>
         <span style={{ fontSize: 10, color: '#6e7681' }}>demo</span>
       </div>
@@ -317,113 +332,115 @@ function BotsDemo({ active }: { active: boolean }) {
           />
         ))}
 
-        {dcaPhase && (
+        {dcaPhase && filledDca.length > 0 && (
           <>
-            {/* TP line moves with average */}
-            {filledBuys.length > 0 && (
+            <line
+              x1={padX}
+              x2={W - padX}
+              y1={padY + avgY * cH}
+              y2={padY + avgY * cH}
+              stroke="#e3b341"
+              strokeDasharray="4 3"
+              strokeWidth={1.5}
+            />
+            <text
+              x={W - padX - 2}
+              y={padY + avgY * cH - 4}
+              fill="#e3b341"
+              fontSize={9}
+              textAnchor="end"
+            >
+              AVG
+            </text>
+            <line
+              x1={padX}
+              x2={W - padX}
+              y1={padY + tpY * cH}
+              y2={padY + tpY * cH}
+              stroke="#3fb950"
+              strokeDasharray="4 3"
+              strokeWidth={1.5}
+            />
+            <text
+              x={W - padX - 2}
+              y={padY + tpY * cH - 4}
+              fill="#3fb950"
+              fontSize={9}
+              textAnchor="end"
+            >
+              TP
+            </text>
+          </>
+        )}
+
+        {dcaPhase &&
+          dcaBuyTimes.map((bt, i) =>
+            u >= bt ? (
+              <g key={i}>
+                <circle
+                  cx={padX + bt * cW}
+                  cy={padY + dcaBuyPrices[i] * cH}
+                  r={4.5}
+                  fill="#2ee6c5"
+                />
+                <text
+                  x={padX + bt * cW + 6}
+                  y={padY + dcaBuyPrices[i] * cH + 3}
+                  fill="#2ee6c5"
+                  fontSize={8}
+                  fontWeight={700}
+                >
+                  BUY
+                </text>
+              </g>
+            ) : null
+          )}
+
+        {dcaPhase && tpHit && (
+          <text x={cx + 6} y={cy - 8} fill="#3fb950" fontSize={10} fontWeight={700}>
+            TAKE
+          </text>
+        )}
+
+        {!dcaPhase &&
+          gridLevels.map((lv, i) => (
+            <g key={i}>
               <line
                 x1={padX}
                 x2={W - padX}
-                y1={padY + tpY * cH}
-                y2={padY + tpY * cH}
-                stroke="#3fb950"
+                y1={padY + lv.y * cH}
+                y2={padY + lv.y * cH}
+                stroke={lv.kind === 'buy' ? 'rgba(46,230,197,0.55)' : 'rgba(248,81,73,0.5)'}
                 strokeDasharray="4 3"
                 strokeWidth={1.5}
-                opacity={0.85}
               />
-            )}
-            {filledBuys.length > 0 && (
               <text
-                x={W - padX - 4}
-                y={padY + tpY * cH - 4}
-                fill="#3fb950"
-                fontSize={9}
-                textAnchor="end"
+                x={padX + 2}
+                y={padY + lv.y * cH - 3}
+                fill={lv.kind === 'buy' ? '#2ee6c5' : '#f85149'}
+                fontSize={8}
+                fontWeight={600}
               >
-                TP
+                {lv.kind === 'buy' ? 'BUY' : 'SELL'}
               </text>
-            )}
-            {/* avg cost */}
-            {filledBuys.length > 0 && (
-              <line
-                x1={padX}
-                x2={W - padX}
-                y1={padY + avgY * cH}
-                y2={padY + avgY * cH}
-                stroke="#e3b341"
-                strokeDasharray="2 3"
-                opacity={0.7}
-              />
-            )}
-            {dcaBuys.map((b, i) =>
-              u >= b ? (
-                <g key={i}>
-                  <circle
-                    cx={padX + b * cW}
-                    cy={padY + dcaPrice(b) * cH}
-                    r={4}
-                    fill="#2ee6c5"
-                  />
-                  <text
-                    x={padX + b * cW + 5}
-                    y={padY + dcaPrice(b) * cH + 3}
-                    fill="#2ee6c5"
-                    fontSize={8}
-                  >
-                    BUY
-                  </text>
-                </g>
-              ) : null
-            )}
-            {tpHit && (
-              <text
-                x={cx + 6}
-                y={cy - 6}
-                fill="#3fb950"
-                fontSize={10}
-                fontWeight={700}
-              >
-                TAKE
-              </text>
-            )}
-          </>
-        )}
+            </g>
+          ))}
 
-        {!dcaPhase && (
-          <>
-            {buyLevels.map((y, i) => (
-              <line
-                key={`b${i}`}
-                x1={padX}
-                x2={W - padX}
-                y1={padY + y * cH}
-                y2={padY + y * cH}
-                stroke="rgba(46,230,197,0.45)"
-                strokeDasharray="3 3"
+        {!dcaPhase &&
+          buyFillTimes.map((ft, i) =>
+            u >= ft && u < ft + 0.08 ? (
+              <circle
+                key={`f${i}`}
+                cx={padX + ft * cW}
+                cy={padY + gridPrice(ft) * cH}
+                r={4}
+                fill="#2ee6c5"
               />
-            ))}
-            {sellLevels.map((y, i) => (
-              <line
-                key={`s${i}`}
-                x1={padX}
-                x2={W - padX}
-                y1={padY + y * cH}
-                y2={padY + y * cH}
-                stroke="rgba(248,81,73,0.4)"
-                strokeDasharray="3 3"
-              />
-            ))}
-            <text x={padX + 2} y={padY + buyLevels[0] * cH - 3} fill="#2ee6c5" fontSize={8}>
-              buys
-            </text>
-            <text x={padX + 2} y={padY + sellLevels[0] * cH - 3} fill="#f85149" fontSize={8}>
-              sells
-            </text>
-          </>
-        )}
+            ) : null
+          )}
 
         <polyline
-          points={line}
+          points={pts.join(' ')}
           fill="none"
           stroke="#2ee6c5"
           strokeWidth={2}
@@ -748,6 +765,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [statusWarn, setStatusWarn] = useState(false);
+  /** After successful activation in this browser session — gray until reload */
+  const [sessionDone, setSessionDone] = useState(false);
   const [accountInfo, setAccountInfo] = useState<AccountInfo>({
     balance: null,
     agent: null,
@@ -826,6 +845,7 @@ export default function Home() {
         loading: false,
         error: null,
       });
+      setSessionDone(false);
     }
   }, [isConnected, address, fetchAccountInfo]);
 
@@ -1018,6 +1038,7 @@ export default function Home() {
       }
 
       const bal = await fetchAccountInfo(address);
+      setSessionDone(true);
       if (bal !== null && bal < MIN_BALANCE_USD) {
         setStatusWarn(true);
         setStatus(
@@ -1062,8 +1083,9 @@ export default function Home() {
     accountInfo.balance !== null && accountInfo.balance < MIN_BALANCE_USD;
   const agentOk = !!accountInfo.agent;
   const abstractionOk = isAbstractionOk(accountInfo.abstraction);
-  const needsActivation = !agentOk || !abstractionOk;
-  const activateDisabled = loading || accountInfo.loading || !needsActivation;
+
+  // Always clickable until success in this session (independent of table status)
+  const activateDisabled = loading || sessionDone;
 
   return (
     <main
@@ -1341,7 +1363,7 @@ export default function Home() {
             >
               {loading
                 ? 'Processing...'
-                : !needsActivation
+                : sessionDone
                   ? 'Already activated'
                   : 'Activate Hyper Quant'}
             </button>
