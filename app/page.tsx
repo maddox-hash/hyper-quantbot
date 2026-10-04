@@ -49,33 +49,11 @@ const abstractionTypes = {
   ],
 } as const;
 
-const FAQ_ITEMS: { q: string; a: string; demo?: boolean }[] = [
-  {
-    q: 'What bots do you offer?',
-    a: 'Classic DCA, Grid and Combo bots — with optional indicators, signals and webhooks. Flexible trailing is supported, including per-level trailing inside the Grid bot.\n\nQuant Bot combines three built-in strategies to decide trade entries.\n\nA Custom Bot is also in development and will offer the most flexible settings.',
-  },
-  {
-    q: 'Do you have access to my funds?',
-    a: 'No. You only create a trading agent on Hyperliquid and connect its API so our bots can trade on your behalf. We never hold your funds or private keys. A trading agent cannot withdraw or transfer your funds — this is documented in Hyperliquid’s own docs.',
-  },
-  {
-    q: 'What is the 0.01% builder fee?',
-    a: 'It is our service fee on top of Hyperliquid’s own exchange fee (0.015%). It only applies on the FREE plan. The DEMO plan carries a separate 0.03% fee when trading with the Quant Bot.',
-  },
-  {
-    q: 'What is Quant Bot?',
-    a: 'Our proprietary bot, currently in its final testing stage. It combines 3 different market-analysis systems. It helps find good entry points alongside a major player while avoiding traps. As a last resort, the position is protected by a flexible stop loss.\n\nQuant Bot builds a full market view from technical analysis, order flow (+ Price Action), liquidations and volume. It reduces risk on weak setups or skips them entirely.',
-    demo: true,
-  },
-  {
-    q: 'What is the minimum amount required for the bots to work?',
-    a: 'It depends on the bot type, but in all cases you need at least $50 for correct operation — otherwise the bot cannot be started.\n\nFor Quant Bot we recommend at least $200, because it follows a fixed built-in strategy and does not offer flexible settings.',
-  },
-  {
-    q: 'What is a Unified Account?',
-    a: 'A Unified Account merges your spot and futures balances into one account for simpler trading. It is required for agents to work correctly and to avoid common errors.\n\nBy default it is enabled on all new accounts. Do not confuse it with hedging mode.',
-  },
-];
+type FaqItem = {
+  q: string;
+  a?: React.ReactNode;
+  demo?: 'quant' | 'bots';
+};
 
 function splitSignature(signature: `0x${string}`) {
   return {
@@ -153,10 +131,74 @@ function isAbstractionOk(mode: string | null) {
   return mode === 'unifiedAccount';
 }
 
-/** ~8s loop: drift up → signals → SELL → drop → signals → BUY → bounce */
-function QuantBotDemo({ active }: { active: boolean }) {
+const hl = (text: string) => (
+  <span style={{ color: '#2ee6c5', fontWeight: 700 }}>{text}</span>
+);
+
+const FAQ_ITEMS: FaqItem[] = [
+  {
+    q: 'What bots do you offer?',
+    a: (
+      <>
+        Classic {hl('DCA')}, {hl('Grid')} and {hl('Combo')} bots — with optional indicators,
+        signals and webhooks. Flexible trailing is supported, including per-level trailing
+        inside the Grid bot.
+        <br />
+        <br />
+        {hl('Quant Bot')} combines three built-in strategies to decide trade entries.
+        <br />
+        <br />A {hl('Custom Bot')} is also in development and will offer the most flexible
+        settings.
+      </>
+    ),
+    demo: 'bots',
+  },
+  {
+    q: 'Do you have access to my funds?',
+    a: (
+      <>
+        No. You only create a trading agent on Hyperliquid and connect its API so our bots can
+        trade on your behalf. We never hold your funds or private keys.{' '}
+        <span
+          style={{
+            color: '#e6edf3',
+            fontWeight: 600,
+            background: 'rgba(46, 230, 197, 0.1)',
+            borderLeft: '2px solid #2ee6c5',
+            padding: '2px 8px',
+            display: 'inline',
+            borderRadius: 4,
+          }}
+        >
+          A trading agent cannot withdraw or transfer your funds — this is documented in
+          Hyperliquid&apos;s own docs.
+        </span>
+      </>
+    ),
+  },
+  {
+    q: 'What is the 0.01% builder fee?',
+    a: 'It is our service fee on top of Hyperliquid’s own exchange fee (0.015%). It only applies on the FREE plan. The DEMO plan carries a separate 0.03% fee when trading with the Quant Bot.',
+  },
+  {
+    q: 'What is Quant Bot?',
+    a: 'Our proprietary bot, currently in its final testing stage. It combines 3 different market-analysis systems. It helps find good entry points alongside a major player while avoiding traps. As a last resort, the position is protected by a flexible stop loss.\n\nQuant Bot builds a full market view from technical analysis, order flow (+ Price Action), liquidations and volume. It reduces risk on weak setups or skips them entirely.',
+    demo: 'quant',
+  },
+  {
+    q: 'What is the minimum amount required for the bots to work?',
+    a: 'It depends on the bot type, but in all cases you need at least $50 for correct operation — otherwise the bot cannot be started.\n\nFor Quant Bot we recommend at least $200, because it follows a fixed built-in strategy and does not offer flexible settings.',
+  },
+  {
+    q: 'What is a Unified Account?',
+    a: 'A Unified Account merges your spot and futures balances into one account for simpler trading. It is required for agents to work correctly and to avoid common errors.\n\nBy default it is enabled on all new accounts. Do not confuse it with hedging mode.',
+  },
+];
+
+/** DCA (~0–4s) then Grid (~4–10s), loop ~10s */
+function BotsDemo({ active }: { active: boolean }) {
   const [t, setT] = useState(0);
-  const raf = useRef<number>(0);
+  const raf = useRef(0);
   const start = useRef(0);
 
   useEffect(() => {
@@ -166,34 +208,260 @@ function QuantBotDemo({ active }: { active: boolean }) {
     }
     start.current = performance.now();
     const loop = (now: number) => {
-      const elapsed = ((now - start.current) % 8000) / 8000;
-      setT(elapsed);
+      setT(((now - start.current) % 10000) / 10000);
       raf.current = requestAnimationFrame(loop);
     };
     raf.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf.current);
   }, [active]);
 
-  // Price path 0..1 time → relative y (0 top, 1 bottom in SVG)
+  const W = 300;
+  const H = 130;
+  const padX = 10;
+  const padY = 14;
+  const cW = W - padX * 2;
+  const cH = H - padY * 2;
+
+  // Phase split
+  const dcaPhase = t < 0.42;
+  const u = dcaPhase ? t / 0.42 : (t - 0.42) / 0.58;
+
+  // --- DCA price: drift down with buys, then bounce to TP ---
+  const dcaPrice = (x: number) => {
+    if (x < 0.55) return 0.28 + x * 0.55; // drop
+    const k = (x - 0.55) / 0.45;
+    return 0.28 + 0.55 * 0.55 - k * 0.42; // bounce
+  };
+
+  // DCA buys at 0.15, 0.3, 0.45 of phase; avg moves down
+  const dcaBuys = [0.12, 0.28, 0.42];
+  const filledBuys = dcaBuys.filter((b) => u >= b);
+  const avgY =
+    filledBuys.length === 0
+      ? dcaPrice(0)
+      : filledBuys.reduce((s, b) => s + dcaPrice(b), 0) / filledBuys.length;
+  // TP sits above avg (fixed offset in chart space)
+  const tpY = Math.max(0.08, avgY - 0.18);
+  const tpHit = u >= 0.72 && dcaPrice(u) <= tpY + 0.02;
+
+  // --- Grid: price mild wave, grid levels ---
+  const gridPrice = (x: number) => 0.45 + Math.sin(x * Math.PI * 2) * 0.18 + x * 0.05;
+  const gridBase = 0.55;
+  const spacing = 0.12;
+  // Buy levels below “center”, shift after fills
+  const shift = u > 0.35 ? spacing * 0.5 : 0;
+  const buyLevels = [gridBase + spacing, gridBase + spacing * 2, gridBase + spacing * 3].map(
+    (y) => y - shift
+  );
+  const sellLevels = [gridBase - spacing, gridBase - spacing * 2].map((y) => y - shift);
+
+  const modeLabel = dcaPhase ? 'DCA · averaging' : 'Grid · dynamic levels';
+
+  const drawLine = (priceFn: (x: number) => number, maxX: number) => {
+    const pts: string[] = [];
+    const n = 60;
+    for (let i = 0; i <= n; i++) {
+      const x = (i / n) * maxX;
+      const px = padX + x * cW;
+      const py = padY + priceFn(x) * cH;
+      pts.push(`${px},${py}`);
+    }
+    return pts.join(' ');
+  };
+
+  const priceFn = dcaPhase ? dcaPrice : gridPrice;
+  const line = drawLine(priceFn, Math.max(0.02, u));
+  const cx = padX + u * cW;
+  const cy = padY + priceFn(u) * cH;
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        borderRadius: 12,
+        border: '1px solid rgba(46, 230, 197, 0.25)',
+        background: 'linear-gradient(160deg, #0d1117 0%, #0a0e14 100%)',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          borderBottom: '1px solid #21262d',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.05em',
+            textTransform: 'uppercase',
+            color: '#2ee6c5',
+          }}
+        >
+          {modeLabel}
+        </span>
+        <span style={{ fontSize: 10, color: '#6e7681' }}>demo</span>
+      </div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+        {[0.25, 0.5, 0.75].map((g) => (
+          <line
+            key={g}
+            x1={padX}
+            x2={W - padX}
+            y1={padY + g * cH}
+            y2={padY + g * cH}
+            stroke="#21262d"
+          />
+        ))}
+
+        {dcaPhase && (
+          <>
+            {/* TP line moves with average */}
+            {filledBuys.length > 0 && (
+              <line
+                x1={padX}
+                x2={W - padX}
+                y1={padY + tpY * cH}
+                y2={padY + tpY * cH}
+                stroke="#3fb950"
+                strokeDasharray="4 3"
+                strokeWidth={1.5}
+                opacity={0.85}
+              />
+            )}
+            {filledBuys.length > 0 && (
+              <text
+                x={W - padX - 4}
+                y={padY + tpY * cH - 4}
+                fill="#3fb950"
+                fontSize={9}
+                textAnchor="end"
+              >
+                TP
+              </text>
+            )}
+            {/* avg cost */}
+            {filledBuys.length > 0 && (
+              <line
+                x1={padX}
+                x2={W - padX}
+                y1={padY + avgY * cH}
+                y2={padY + avgY * cH}
+                stroke="#e3b341"
+                strokeDasharray="2 3"
+                opacity={0.7}
+              />
+            )}
+            {dcaBuys.map((b, i) =>
+              u >= b ? (
+                <g key={i}>
+                  <circle
+                    cx={padX + b * cW}
+                    cy={padY + dcaPrice(b) * cH}
+                    r={4}
+                    fill="#2ee6c5"
+                  />
+                  <text
+                    x={padX + b * cW + 5}
+                    y={padY + dcaPrice(b) * cH + 3}
+                    fill="#2ee6c5"
+                    fontSize={8}
+                  >
+                    BUY
+                  </text>
+                </g>
+              ) : null
+            )}
+            {tpHit && (
+              <text
+                x={cx + 6}
+                y={cy - 6}
+                fill="#3fb950"
+                fontSize={10}
+                fontWeight={700}
+              >
+                TAKE
+              </text>
+            )}
+          </>
+        )}
+
+        {!dcaPhase && (
+          <>
+            {buyLevels.map((y, i) => (
+              <line
+                key={`b${i}`}
+                x1={padX}
+                x2={W - padX}
+                y1={padY + y * cH}
+                y2={padY + y * cH}
+                stroke="rgba(46,230,197,0.45)"
+                strokeDasharray="3 3"
+              />
+            ))}
+            {sellLevels.map((y, i) => (
+              <line
+                key={`s${i}`}
+                x1={padX}
+                x2={W - padX}
+                y1={padY + y * cH}
+                y2={padY + y * cH}
+                stroke="rgba(248,81,73,0.4)"
+                strokeDasharray="3 3"
+              />
+            ))}
+            <text x={padX + 2} y={padY + buyLevels[0] * cH - 3} fill="#2ee6c5" fontSize={8}>
+              buys
+            </text>
+            <text x={padX + 2} y={padY + sellLevels[0] * cH - 3} fill="#f85149" fontSize={8}>
+              sells
+            </text>
+          </>
+        )}
+
+        <polyline
+          points={line}
+          fill="none"
+          stroke="#2ee6c5"
+          strokeWidth={2}
+          strokeLinejoin="round"
+        />
+        <circle cx={cx} cy={cy} r={3.5} fill="#5ef0d4" />
+      </svg>
+    </div>
+  );
+}
+
+function QuantBotDemo({ active }: { active: boolean }) {
+  const [t, setT] = useState(0);
+  const raf = useRef(0);
+  const start = useRef(0);
+
+  useEffect(() => {
+    if (!active) {
+      setT(0);
+      return;
+    }
+    start.current = performance.now();
+    const loop = (now: number) => {
+      setT(((now - start.current) % 8000) / 8000);
+      raf.current = requestAnimationFrame(loop);
+    };
+    raf.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf.current);
+  }, [active]);
+
   const priceAt = (u: number) => {
-    if (u < 0.28) {
-      // flat slight rise
-      return 0.55 - u * 0.35;
-    }
-    if (u < 0.34) {
-      // peak hold
-      return 0.55 - 0.28 * 0.35;
-    }
+    if (u < 0.28) return 0.55 - u * 0.35;
+    if (u < 0.34) return 0.55 - 0.28 * 0.35;
     if (u < 0.62) {
-      // sharp drop
       const k = (u - 0.34) / 0.28;
       return 0.452 + k * 0.38;
     }
-    if (u < 0.7) {
-      // bottom
-      return 0.832;
-    }
-    // bounce after buy
+    if (u < 0.7) return 0.832;
     const k = (u - 0.7) / 0.3;
     return 0.832 - k * 0.28;
   };
@@ -210,16 +478,12 @@ function QuantBotDemo({ active }: { active: boolean }) {
   const maxU = Math.max(0.02, t);
   for (let i = 0; i <= steps; i++) {
     const u = (i / steps) * maxU;
-    const x = padX + u * chartW;
-    const y = padY + priceAt(u) * chartH;
-    pts.push(`${x},${y}`);
+    pts.push(`${padX + u * chartW},${padY + priceAt(u) * chartH}`);
   }
-  const line = pts.join(' ');
 
   const cx = padX + t * chartW;
   const cy = padY + priceAt(t) * chartH;
 
-  // Signal phases (sell side 0.12–0.32, buy side 0.55–0.72)
   const sellSignals = [
     { id: 'Bear Divergence', from: 0.1 },
     { id: 'Ask > Bid', from: 0.14 },
@@ -250,13 +514,11 @@ function QuantBotDemo({ active }: { active: boolean }) {
         border: '1px solid rgba(46, 230, 197, 0.25)',
         background: 'linear-gradient(160deg, #0d1117 0%, #0a0e14 100%)',
         overflow: 'hidden',
-        boxShadow: 'inset 0 0 0 1px rgba(46, 230, 197, 0.06)',
       }}
     >
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
           justifyContent: 'space-between',
           padding: '8px 12px',
           borderBottom: '1px solid #21262d',
@@ -273,36 +535,10 @@ function QuantBotDemo({ active }: { active: boolean }) {
         >
           Quant Bot · live sim
         </span>
-        <span
-          style={{
-            fontSize: 10,
-            color: '#6e7681',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: '#3fb950',
-              boxShadow: '0 0 6px rgba(63,185,80,0.7)',
-              animation: active ? 'hqPulse 1.4s ease-in-out infinite' : undefined,
-            }}
-          />
-          demo
-        </span>
+        <span style={{ fontSize: 10, color: '#6e7681' }}>demo</span>
       </div>
-
-      <div style={{ display: 'flex', gap: 0 }}>
-        <svg
-          width="100%"
-          viewBox={`0 0 ${W} ${H}`}
-          style={{ flex: 1, display: 'block', minWidth: 0 }}
-        >
-          {/* grid */}
+      <div style={{ display: 'flex' }}>
+        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ flex: 1, minWidth: 0 }}>
           {[0.25, 0.5, 0.75].map((g) => (
             <line
               key={g}
@@ -311,23 +547,13 @@ function QuantBotDemo({ active }: { active: boolean }) {
               y1={padY + g * chartH}
               y2={padY + g * chartH}
               stroke="#21262d"
-              strokeWidth={1}
             />
           ))}
           <polyline
-            points={line}
+            points={pts.join(' ')}
             fill="none"
             stroke="#2ee6c5"
             strokeWidth={2}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-          {/* glow under line */}
-          <polyline
-            points={line}
-            fill="none"
-            stroke="rgba(46,230,197,0.25)"
-            strokeWidth={5}
             strokeLinejoin="round"
           />
           {t > 0.02 && (
@@ -344,13 +570,7 @@ function QuantBotDemo({ active }: { active: boolean }) {
                 strokeDasharray="3 3"
               />
               <circle cx={sellX} cy={sellY} r={5} fill="#f85149" />
-              <text
-                x={sellX + 6}
-                y={sellY - 6}
-                fill="#f85149"
-                fontSize={10}
-                fontWeight={700}
-              >
+              <text x={sellX + 6} y={sellY - 6} fill="#f85149" fontSize={10} fontWeight={700}>
                 SELL
               </text>
             </>
@@ -366,41 +586,25 @@ function QuantBotDemo({ active }: { active: boolean }) {
                 strokeDasharray="3 3"
               />
               <circle cx={buyX} cy={buyY} r={5} fill="#3fb950" />
-              <text
-                x={buyX + 6}
-                y={buyY + 12}
-                fill="#3fb950"
-                fontSize={10}
-                fontWeight={700}
-              >
+              <text x={buyX + 6} y={buyY + 12} fill="#3fb950" fontSize={10} fontWeight={700}>
                 BUY
               </text>
             </>
           )}
         </svg>
-
-        {/* signals panel */}
         <div
           style={{
             width: 118,
             flexShrink: 0,
             borderLeft: '1px solid #21262d',
-            padding: '8px 8px',
+            padding: '8px',
+            background: '#0a0d12',
             display: 'flex',
             flexDirection: 'column',
             gap: 4,
-            background: '#0a0d12',
           }}
         >
-          <div
-            style={{
-              fontSize: 9,
-              color: '#6e7681',
-              fontWeight: 600,
-              letterSpacing: '0.04em',
-              marginBottom: 2,
-            }}
-          >
+          <div style={{ fontSize: 9, color: '#6e7681', fontWeight: 600, marginBottom: 2 }}>
             SIGNALS
           </div>
           {(t < 0.5 ? sellSignals : buySignals).map((s) => {
@@ -423,7 +627,6 @@ function QuantBotDemo({ active }: { active: boolean }) {
                   border: on
                     ? `1px solid ${bearish ? 'rgba(248,81,73,0.35)' : 'rgba(63,185,80,0.35)'}`
                     : '1px solid transparent',
-                  transition: 'opacity 0.25s, background 0.25s',
                   fontWeight: on ? 600 : 400,
                 }}
               >
@@ -442,14 +645,7 @@ function FaqAccordion() {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
 
   return (
-    <div
-      style={{
-        marginTop: 28,
-        width: '100%',
-        maxWidth: 420,
-        textAlign: 'left',
-      }}
-    >
+    <div style={{ marginTop: 28, width: '100%', maxWidth: 420, textAlign: 'left' }}>
       <h2
         style={{
           margin: '0 0 14px',
@@ -475,12 +671,7 @@ function FaqAccordion() {
         {FAQ_ITEMS.map((item, i) => {
           const open = openIndex === i;
           return (
-            <div
-              key={item.q}
-              style={{
-                borderTop: i === 0 ? 'none' : '1px solid #21262d',
-              }}
-            >
+            <div key={item.q} style={{ borderTop: i === 0 ? 'none' : '1px solid #21262d' }}>
               <button
                 type="button"
                 onClick={() => setOpenIndex(open ? null : i)}
@@ -513,15 +704,12 @@ function FaqAccordion() {
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: open
-                      ? 'rgba(46, 230, 197, 0.18)'
-                      : 'rgba(48, 54, 61, 0.8)',
+                    background: open ? 'rgba(46, 230, 197, 0.18)' : 'rgba(48, 54, 61, 0.8)',
                     color: open ? '#2ee6c5' : '#8b949e',
                     fontSize: 16,
                     fontWeight: 700,
-                    lineHeight: 1,
-                    transition: 'transform 0.2s, background 0.15s',
                     transform: open ? 'rotate(45deg)' : 'none',
+                    transition: 'transform 0.2s',
                   }}
                   aria-hidden
                 >
@@ -535,12 +723,13 @@ function FaqAccordion() {
                       color: '#8b949e',
                       fontSize: 13,
                       lineHeight: 1.55,
-                      whiteSpace: 'pre-line',
+                      whiteSpace: typeof item.a === 'string' ? 'pre-line' : undefined,
                     }}
                   >
                     {item.a}
                   </div>
-                  {item.demo && <QuantBotDemo active={open} />}
+                  {item.demo === 'quant' && <QuantBotDemo active={open} />}
+                  {item.demo === 'bots' && <BotsDemo active={open} />}
                 </div>
               )}
             </div>
@@ -558,6 +747,7 @@ export default function Home() {
   const [telegramId, setTelegramId] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [statusWarn, setStatusWarn] = useState(false);
   const [accountInfo, setAccountInfo] = useState<AccountInfo>({
     balance: null,
     agent: null,
@@ -566,7 +756,7 @@ export default function Home() {
     error: null,
   });
 
-  const fetchAccountInfo = useCallback(async (userAddress: string) => {
+  const fetchAccountInfo = useCallback(async (userAddress: string): Promise<number | null> => {
     setAccountInfo((prev) => ({ ...prev, error: null }));
     const user = userAddress.toLowerCase();
     try {
@@ -587,13 +777,11 @@ export default function Home() {
 
       const perpValue =
         parseFloat(clearing?.marginSummary?.accountValue ?? clearing?.withdrawable ?? '0') || 0;
-
       const spotUsdc = Array.isArray(spot?.balances)
         ? spot.balances
             .filter((b) => b.coin === 'USDC')
             .reduce((sum, b) => sum + (parseFloat(b.total) || 0), 0)
         : 0;
-
       const balance = perpValue + spotUsdc;
 
       const agentList = Array.isArray(agents) ? agents : [];
@@ -603,9 +791,7 @@ export default function Home() {
         null;
 
       const abstraction =
-        typeof abstractionRaw === 'string'
-          ? abstractionRaw.replace(/^"|"$/g, '')
-          : null;
+        typeof abstractionRaw === 'string' ? abstractionRaw.replace(/^"|"$/g, '') : null;
 
       setAccountInfo({
         balance,
@@ -616,6 +802,7 @@ export default function Home() {
         loading: false,
         error: null,
       });
+      return balance;
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load account data';
       setAccountInfo((prev) => ({
@@ -623,6 +810,7 @@ export default function Home() {
         loading: false,
         error: `Error#201 — Could not load account info from Hyperliquid: ${msg}`,
       }));
+      return null;
     }
   }, []);
 
@@ -644,9 +832,11 @@ export default function Home() {
   const handleApproveAndActivate = async () => {
     if (!address) {
       setStatus('Error#101 — Wallet is not connected. Connect your wallet first.');
+      setStatusWarn(false);
       return;
     }
     setLoading(true);
+    setStatusWarn(false);
     setStatus('Generating trading agent...');
 
     let stage:
@@ -661,12 +851,11 @@ export default function Home() {
     try {
       const agentPrivKey = generatePrivateKey();
       const agentAccount = privateKeyToAccount(agentPrivKey);
-
       const agentNonce = Date.now();
       const builderNonce = agentNonce + 1;
       const abstractionNonce = agentNonce + 2;
 
-      // ---------- 1/3 Agent (always) ----------
+      // 1/3 Agent
       stage = 'agent_sign';
       setStatus('Sign agent approval in your wallet (1/3)...');
       const agentAction = {
@@ -677,7 +866,6 @@ export default function Home() {
         agentName: AGENT_NAME,
         nonce: agentNonce,
       };
-
       let agentSig: `0x${string}`;
       try {
         agentSig = await signTypedDataAsync({
@@ -703,17 +891,11 @@ export default function Home() {
 
       stage = 'agent_submit';
       setStatus('Registering agent on Hyperliquid...');
-      try {
-        await submitToHyperliquid(agentAction, splitSignature(agentSig), agentNonce);
-      } catch (apiErr: unknown) {
-        const m = apiErr instanceof Error ? apiErr.message : String(apiErr);
-        throw new Error(`Error#104 — Hyperliquid rejected agent registration. Details: ${m}`);
-      }
-
+      await submitToHyperliquid(agentAction, splitSignature(agentSig), agentNonce);
       setStatus('Agent registered. Updating status...');
       await fetchAccountInfo(address);
 
-      // ---------- 2/3 Builder fee (always) ----------
+      // 2/3 Builder
       stage = 'builder_sign';
       setStatus('Sign builder fee approval in your wallet (2/3)...');
       const builderAction = {
@@ -724,7 +906,6 @@ export default function Home() {
         builder: BUILDER_ADDRESS,
         nonce: builderNonce,
       };
-
       let builderSig: `0x${string}`;
       try {
         builderSig = await signTypedDataAsync({
@@ -760,11 +941,10 @@ export default function Home() {
           );
         }
       }
-
       setStatus('Builder fee registered. Updating status...');
       await fetchAccountInfo(address);
 
-      // ---------- 3/3 Abstraction (always → unifiedAccount) ----------
+      // 3/3 Abstraction
       stage = 'abstraction_sign';
       setStatus('Sign unified account abstraction in your wallet (3/3)...');
       const abstractionAction = {
@@ -775,7 +955,6 @@ export default function Home() {
         abstraction: TARGET_ABSTRACTION,
         nonce: abstractionNonce,
       };
-
       let abstractionSig: `0x${string}`;
       try {
         abstractionSig = await signTypedDataAsync({
@@ -815,11 +994,10 @@ export default function Home() {
           );
         }
       }
-
       setStatus('Abstraction set. Updating status...');
       await fetchAccountInfo(address);
 
-      // ---------- Save ----------
+      // Save always
       stage = 'save';
       setStatus('Saving data...');
       const res = await fetch('/api/activate', {
@@ -832,7 +1010,6 @@ export default function Home() {
           telegram_id: telegramId || undefined,
         }),
       });
-
       const data = await res.json();
       if (!res.ok) {
         throw new Error(
@@ -840,9 +1017,18 @@ export default function Home() {
         );
       }
 
-      setStatus('Activated successfully. You can return to Telegram.');
-      await fetchAccountInfo(address);
+      const bal = await fetchAccountInfo(address);
+      if (bal !== null && bal < MIN_BALANCE_USD) {
+        setStatusWarn(true);
+        setStatus(
+          `Insufficient funds for trading (less than $${MIN_BALANCE_USD}). Please read the FAQ.`
+        );
+      } else {
+        setStatusWarn(false);
+        setStatus('Activated successfully. You can return to Telegram.');
+      }
     } catch (e: unknown) {
+      setStatusWarn(false);
       const message = e instanceof Error ? e.message : 'Something went wrong';
       if (message.startsWith('Error#')) {
         setStatus(message);
@@ -852,8 +1038,7 @@ export default function Home() {
           agent_submit: 'Error#104 — Failed to register agent on Hyperliquid.',
           builder_sign: 'Error#103 — Builder fee approval step failed or was canceled.',
           builder_submit: 'Error#105 — Failed to register builder fee on Hyperliquid.',
-          abstraction_sign:
-            'Error#107 — Account abstraction step failed or was canceled.',
+          abstraction_sign: 'Error#107 — Account abstraction step failed or was canceled.',
           abstraction_submit: 'Error#108 — Failed to set unified account abstraction.',
           save: 'Error#106 — Failed to save activation data.',
         };
@@ -877,7 +1062,6 @@ export default function Home() {
     accountInfo.balance !== null && accountInfo.balance < MIN_BALANCE_USD;
   const agentOk = !!accountInfo.agent;
   const abstractionOk = isAbstractionOk(accountInfo.abstraction);
-
   const needsActivation = !agentOk || !abstractionOk;
   const activateDisabled = loading || accountInfo.loading || !needsActivation;
 
@@ -975,14 +1159,7 @@ export default function Home() {
         >
           HYPER QUANT
         </h1>
-        <p
-          style={{
-            color: '#8b949e',
-            fontSize: '14px',
-            lineHeight: 1.5,
-            margin: '0 0 28px',
-          }}
-        >
+        <p style={{ color: '#8b949e', fontSize: '14px', lineHeight: 1.5, margin: '0 0 28px' }}>
           Algorithmic Trading System
         </p>
 
@@ -1036,7 +1213,6 @@ export default function Home() {
                 color: '#e6edf3',
                 fontSize: '15px',
                 outline: 'none',
-                transition: 'border-color 0.15s, box-shadow 0.15s',
               }}
               onFocus={(e) => {
                 e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
@@ -1048,19 +1224,11 @@ export default function Home() {
               }}
             />
           </div>
-          <p
-            style={{
-              margin: '8px 0 0',
-              fontSize: '12px',
-              color: '#8b949e',
-              lineHeight: 1.5,
-            }}
-          >
-            <span style={{ color: '#e3b341', fontWeight: 600 }}>Note:</span>{' '}
-            Enter your Telegram @Nickname if you have an active paid subscription. Leave this
-            field empty on the free plan — a builder fee of{' '}
-            <span style={{ color: '#2ee6c5' }}>0.01%</span> will apply (up to{' '}
-            <span style={{ color: '#2ee6c5' }}>0.03%</span> for our MVP Quant Bot).
+          <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#8b949e', lineHeight: 1.5 }}>
+            <span style={{ color: '#e3b341', fontWeight: 600 }}>Note:</span> Enter your Telegram
+            @Nickname if you have an active paid subscription. Leave empty on the free plan — a
+            builder fee of <span style={{ color: '#2ee6c5' }}>0.01%</span> applies (up to{' '}
+            <span style={{ color: '#2ee6c5' }}>0.03%</span> for Quant Bot on DEMO).
           </p>
         </div>
 
@@ -1072,7 +1240,7 @@ export default function Home() {
           <div
             style={{
               marginTop: '16px',
-              padding: '14px 14px',
+              padding: '14px',
               borderRadius: '12px',
               border: '1px solid #30363d',
               background: '#0d1117',
@@ -1084,11 +1252,9 @@ export default function Home() {
             {accountInfo.loading && !accountInfo.agent && accountInfo.balance === null && (
               <p style={{ margin: 0, color: '#8b949e' }}>Loading account data…</p>
             )}
-
             {accountInfo.error && (
               <p style={{ margin: 0, color: '#ff7b72' }}>{accountInfo.error}</p>
             )}
-
             {!accountInfo.error &&
               !(accountInfo.loading && !accountInfo.agent && accountInfo.balance === null) && (
               <>
@@ -1096,29 +1262,13 @@ export default function Home() {
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    alignItems: 'flex-start',
                     marginBottom: 10,
                     gap: 8,
                   }}
                 >
-                  <span style={{ color: '#8b949e', flexShrink: 0 }}>Agent</span>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      textAlign: 'right',
-                      minWidth: 0,
-                    }}
-                  >
-                    <span
-                      style={{
-                        color: '#e6edf3',
-                        fontWeight: 500,
-                        wordBreak: 'break-all',
-                        fontSize: '12px',
-                      }}
-                    >
+                  <span style={{ color: '#8b949e' }}>Agent</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: '#e6edf3', fontSize: 12, wordBreak: 'break-all' }}>
                       {accountInfo.agent
                         ? `${accountInfo.agent.name} · ${accountInfo.agent.address.slice(0, 6)}…${accountInfo.agent.address.slice(-4)}`
                         : 'Not registered'}
@@ -1126,12 +1276,10 @@ export default function Home() {
                     <CheckIcon ok={agentOk} />
                   </div>
                 </div>
-
                 <div
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    alignItems: 'center',
                     marginBottom: 10,
                     gap: 8,
                   }}
@@ -1144,14 +1292,11 @@ export default function Home() {
                     <CheckIcon ok={abstractionOk} />
                   </div>
                 </div>
-
                 <div
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    alignItems: 'center',
                     marginBottom: insufficientFunds ? 8 : 0,
-                    gap: 8,
                   }}
                 >
                   <span style={{ color: '#8b949e' }}>Balance</span>
@@ -1164,16 +1309,8 @@ export default function Home() {
                       : '—'}
                   </span>
                 </div>
-
                 {insufficientFunds && (
-                  <p
-                    style={{
-                      margin: 0,
-                      color: '#e3b341',
-                      fontWeight: 600,
-                      fontSize: '13px',
-                    }}
-                  >
+                  <p style={{ margin: 0, color: '#e3b341', fontWeight: 600, fontSize: 13 }}>
                     Insufficient funds (less than ${MIN_BALANCE_USD})
                   </p>
                 )}
@@ -1198,18 +1335,8 @@ export default function Home() {
                 color: activateDisabled ? '#8b949e' : '#0b0e14',
                 fontWeight: 700,
                 fontSize: '15px',
-                letterSpacing: '0.01em',
                 cursor: activateDisabled ? 'not-allowed' : 'pointer',
-                transition: 'opacity 0.2s, transform 0.15s',
-                boxShadow: activateDisabled
-                  ? 'none'
-                  : '0 4px 20px rgba(46, 230, 197, 0.25)',
-              }}
-              onMouseEnter={(e) => {
-                if (!activateDisabled) e.currentTarget.style.opacity = '0.92';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.opacity = '1';
+                boxShadow: activateDisabled ? 'none' : '0 4px 20px rgba(46, 230, 197, 0.25)',
               }}
             >
               {loading
@@ -1226,7 +1353,11 @@ export default function Home() {
                   marginBottom: 0,
                   fontSize: '13px',
                   lineHeight: 1.45,
-                  color: status.startsWith('Error') ? '#ff7b72' : '#7ee787',
+                  color: status.startsWith('Error')
+                    ? '#ff7b72'
+                    : statusWarn
+                      ? '#e3b341'
+                      : '#7ee787',
                   wordBreak: 'break-word',
                 }}
               >
@@ -1256,15 +1387,6 @@ export default function Home() {
             fontWeight: 600,
             fontSize: '14px',
             textDecoration: 'none',
-            transition: 'background 0.15s, border-color 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(46, 230, 197, 0.12)';
-            e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.55)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(46, 230, 197, 0.06)';
-            e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.35)';
           }}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1299,7 +1421,6 @@ export default function Home() {
               boxShadow: '0 0 8px rgba(63, 185, 80, 0.6)',
               animation: 'hqPulse 1.6s ease-in-out infinite',
               display: 'inline-block',
-              flexShrink: 0,
             }}
           />
           <span style={{ fontSize: '12px', color: '#6e7681' }}>
