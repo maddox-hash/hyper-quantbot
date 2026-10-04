@@ -194,13 +194,7 @@ const FAQ_ITEMS: FaqItem[] = [
   },
 ];
 
-/**
- * Grid logic (per level):
- * 1) BUY below price
- * 2) BUY fills → SELL appears above that level only
- * 3) SELL fills → new BUY below again
- * Levels never stack on the same Y (sell offset != grid step).
- */
+/** DCA then Grid (ends when all buys filled + sells placed), loop ~12s */
 function BotsDemo({ active }: { active: boolean }) {
   const [t, setT] = useState(0);
   const raf = useRef(0);
@@ -213,7 +207,7 @@ function BotsDemo({ active }: { active: boolean }) {
     }
     start.current = performance.now();
     const loop = (now: number) => {
-      setT(((now - start.current) % 14000) / 14000);
+      setT(((now - start.current) % 12000) / 12000);
       raf.current = requestAnimationFrame(loop);
     };
     raf.current = requestAnimationFrame(loop);
@@ -227,10 +221,9 @@ function BotsDemo({ active }: { active: boolean }) {
   const cW = W - padX * 2;
   const cH = H - padY * 2;
 
-  const dcaPhase = t < 0.4;
-  const u = dcaPhase ? t / 0.4 : (t - 0.4) / 0.6;
+  const dcaPhase = t < 0.45;
+  const u = dcaPhase ? t / 0.45 : (t - 0.45) / 0.55;
 
-  // ——— DCA ———
   const dcaBuyTimes = [0.15, 0.32, 0.48];
   const dcaBuyPrices = [0.32, 0.48, 0.64];
 
@@ -261,56 +254,27 @@ function BotsDemo({ active }: { active: boolean }) {
   const tpY = Math.max(0.1, avgY - 0.2);
   const tpHit = filledDca.length >= 3 && u >= 0.78 && dcaPrice(u) <= tpY + 0.03;
 
-  // ——— Grid ———
-  // 3 independent slots. Buy Ys spaced 0.13 apart.
-  // Sell sits 0.09 ABOVE its own buy (not on neighbouring buy).
-  // After sell: rebuy slightly below original buy.
   const buyYs = [0.58, 0.71, 0.84];
-  const sellOffset = 0.09; // sell above buy
-  const rebuyExtra = 0.05; // rebuy deeper than original buy
+  const sellOffset = 0.09;
+  const buyFillAt = [0.18, 0.38, 0.58];
+  const gridDoneAt = 0.72;
 
-  // Timeline: hit buys while falling, then sells while rising
-  const buyFillAt = [0.14, 0.24, 0.34];
-  const sellFillAt = [0.5, 0.6, 0.7];
-
-  // Price path aligned to levels
   const gridPrice = (x: number) => {
-    // start above grid, fall through buys
-    if (x < 0.08) return 0.4;
-    if (x < buyFillAt[0]) {
-      const k = (x - 0.08) / (buyFillAt[0] - 0.08);
+    const xClamped = Math.min(x, gridDoneAt);
+    if (xClamped < 0.1) return 0.4;
+    if (xClamped < buyFillAt[0]) {
+      const k = (xClamped - 0.1) / (buyFillAt[0] - 0.1);
       return 0.4 + k * (buyYs[0] - 0.4);
     }
-    if (x < buyFillAt[1]) {
-      const k = (x - buyFillAt[0]) / (buyFillAt[1] - buyFillAt[0]);
+    if (xClamped < buyFillAt[1]) {
+      const k = (xClamped - buyFillAt[0]) / (buyFillAt[1] - buyFillAt[0]);
       return buyYs[0] + k * (buyYs[1] - buyYs[0]);
     }
-    if (x < buyFillAt[2]) {
-      const k = (x - buyFillAt[1]) / (buyFillAt[2] - buyFillAt[1]);
+    if (xClamped < buyFillAt[2]) {
+      const k = (xClamped - buyFillAt[1]) / (buyFillAt[2] - buyFillAt[1]);
       return buyYs[1] + k * (buyYs[2] - buyYs[1]);
     }
-    if (x < 0.42) {
-      // brief hold near bottom
-      return buyYs[2] + 0.02;
-    }
-    // rise through sells (sellY = buyY - sellOffset)
-    const sellYs = buyYs.map((y) => y - sellOffset);
-    if (x < sellFillAt[2]) {
-      // from bottom up toward highest sell (lowest y)
-      if (x < sellFillAt[0]) {
-        const k = (x - 0.42) / (sellFillAt[0] - 0.42);
-        return buyYs[2] + 0.02 + k * (sellYs[2] - (buyYs[2] + 0.02));
-      }
-      if (x < sellFillAt[1]) {
-        const k = (x - sellFillAt[0]) / (sellFillAt[1] - sellFillAt[0]);
-        return sellYs[2] + k * (sellYs[1] - sellYs[2]);
-      }
-      const k = (x - sellFillAt[1]) / (sellFillAt[2] - sellFillAt[1]);
-      return sellYs[1] + k * (sellYs[0] - sellYs[1]);
-    }
-    // after all sells: mild drift
-    const k = (x - sellFillAt[2]) / (1 - sellFillAt[2]);
-    return sellYs[0] - k * 0.08;
+    return buyYs[2] + 0.02;
   };
 
   type GLevel = { y: number; kind: 'buy' | 'sell'; flash: boolean };
@@ -319,52 +283,37 @@ function BotsDemo({ active }: { active: boolean }) {
   for (let i = 0; i < 3; i++) {
     const buyY = buyYs[i];
     const sellY = buyY - sellOffset;
-    const rebuyY = buyY + rebuyExtra;
-
     if (u < buyFillAt[i]) {
-      // waiting buy — only this
       levels.push({
         y: buyY,
         kind: 'buy',
-        flash: u >= buyFillAt[i] - 0.035 && u < buyFillAt[i],
+        flash: u >= buyFillAt[i] - 0.04 && u < buyFillAt[i],
       });
-    } else if (u < sellFillAt[i]) {
-      // buy done → only sell for this slot (no buy on this slot)
+    } else {
       levels.push({
         y: sellY,
         kind: 'sell',
-        flash: u >= sellFillAt[i] - 0.035 && u < sellFillAt[i],
-      });
-    } else {
-      // sell done → only rebuy below, after THIS sell filled
-      levels.push({
-        y: rebuyY,
-        kind: 'buy',
-        flash: false,
+        flash: u >= buyFillAt[i] && u < buyFillAt[i] + 0.05,
       });
     }
   }
 
   const priceFn = dcaPhase ? dcaPrice : gridPrice;
-  const maxX = Math.max(0.02, u);
+  const drawU = dcaPhase ? u : Math.min(u, gridDoneAt);
+  const maxX = Math.max(0.02, drawU);
   const pts: string[] = [];
   for (let i = 0; i <= 90; i++) {
     const x = (i / 90) * maxX;
     pts.push(`${padX + x * cW},${padY + priceFn(x) * cH}`);
   }
-  const cx = padX + u * cW;
-  const cy = padY + priceFn(u) * cH;
+  const cx = padX + drawU * cW;
+  const cy = padY + priceFn(drawU) * cH;
 
-  const fillMarkers: { x: number; y: number; kind: 'buy' | 'sell' }[] = [];
+  const fillMarkers: { x: number; y: number }[] = [];
   if (!dcaPhase) {
     buyFillAt.forEach((ft, i) => {
-      if (u >= ft && u < ft + 0.05) {
-        fillMarkers.push({ x: ft, y: buyYs[i], kind: 'buy' });
-      }
-    });
-    sellFillAt.forEach((ft, i) => {
-      if (u >= ft && u < ft + 0.05) {
-        fillMarkers.push({ x: ft, y: buyYs[i] - sellOffset, kind: 'sell' });
+      if (u >= ft && u < ft + 0.06) {
+        fillMarkers.push({ x: ft, y: buyYs[i] });
       }
     });
   }
@@ -520,7 +469,7 @@ function BotsDemo({ active }: { active: boolean }) {
               cx={padX + m.x * cW}
               cy={padY + m.y * cH}
               r={5}
-              fill={m.kind === 'buy' ? '#2ee6c5' : '#f85149'}
+              fill="#2ee6c5"
               opacity={0.95}
             />
           ))}
