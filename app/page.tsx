@@ -104,7 +104,6 @@ const CSS_VARS = `
   :root {
     --hq-bg: #0b0e14;
     --hq-card: #12161d;
-    --hq-card-2: #0e1218;
     --hq-border: rgba(255, 255, 255, 0.06);
     --hq-accent: #2ee6c5;
     --hq-accent-2: #5ef0d4;
@@ -162,8 +161,7 @@ function SkeletonLine({ w = '100%' }: { w?: string }) {
         height: 12,
         width: w,
         borderRadius: 6,
-        background:
-          'linear-gradient(90deg, #1a1f27 0%, #252b36 50%, #1a1f27 100%)',
+        background: 'linear-gradient(90deg, #1a1f27 0%, #252b36 50%, #1a1f27 100%)',
         backgroundSize: '200% 100%',
         animation: 'hqSkeleton 1.2s ease-in-out infinite',
       }}
@@ -244,6 +242,16 @@ const FAQ_ITEMS: FaqItem[] = [
   },
 ];
 
+/** Smooth lerp helper */
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * Math.min(1, Math.max(0, t));
+}
+
+/**
+ * DCA then Grid.
+ * Grid: price down → 3 BUY fills (each becomes SELL above) →
+ * price up → 3 SELL fills (levels disappear). No end jitter.
+ */
 function BotsDemo({ active }: { active: boolean }) {
   const [t, setT] = useState(0);
   const raf = useRef(0);
@@ -256,7 +264,7 @@ function BotsDemo({ active }: { active: boolean }) {
     }
     start.current = performance.now();
     const loop = (now: number) => {
-      setT(((now - start.current) % 12000) / 12000);
+      setT(((now - start.current) % 14000) / 14000);
       raf.current = requestAnimationFrame(loop);
     };
     raf.current = requestAnimationFrame(loop);
@@ -270,27 +278,31 @@ function BotsDemo({ active }: { active: boolean }) {
   const cW = W - padX * 2;
   const cH = H - padY * 2;
 
-  const dcaPhase = t < 0.45;
-  const u = dcaPhase ? t / 0.45 : (t - 0.45) / 0.55;
+  const dcaPhase = t < 0.4;
+  const u = dcaPhase ? t / 0.4 : (t - 0.4) / 0.6;
 
+  // ——— DCA ———
   const dcaBuyTimes = [0.15, 0.32, 0.48];
   const dcaBuyPrices = [0.32, 0.48, 0.64];
 
   const dcaPrice = (x: number) => {
-    if (x < dcaBuyTimes[0]) {
-      return 0.22 + (x / dcaBuyTimes[0]) * (dcaBuyPrices[0] - 0.22);
-    }
+    if (x < dcaBuyTimes[0]) return lerp(0.22, dcaBuyPrices[0], x / dcaBuyTimes[0]);
     if (x < dcaBuyTimes[1]) {
-      const k = (x - dcaBuyTimes[0]) / (dcaBuyTimes[1] - dcaBuyTimes[0]);
-      return dcaBuyPrices[0] + k * (dcaBuyPrices[1] - dcaBuyPrices[0]);
+      return lerp(
+        dcaBuyPrices[0],
+        dcaBuyPrices[1],
+        (x - dcaBuyTimes[0]) / (dcaBuyTimes[1] - dcaBuyTimes[0])
+      );
     }
     if (x < dcaBuyTimes[2]) {
-      const k = (x - dcaBuyTimes[1]) / (dcaBuyTimes[2] - dcaBuyTimes[1]);
-      return dcaBuyPrices[1] + k * (dcaBuyPrices[2] - dcaBuyPrices[1]);
+      return lerp(
+        dcaBuyPrices[1],
+        dcaBuyPrices[2],
+        (x - dcaBuyTimes[1]) / (dcaBuyTimes[2] - dcaBuyTimes[1])
+      );
     }
     if (x < 0.62) return dcaBuyPrices[2];
-    const k = (x - 0.62) / 0.38;
-    return dcaBuyPrices[2] - k * 0.42;
+    return lerp(dcaBuyPrices[2], dcaBuyPrices[2] - 0.42, (x - 0.62) / 0.38);
   };
 
   const filledDca = dcaBuyTimes
@@ -303,69 +315,120 @@ function BotsDemo({ active }: { active: boolean }) {
   const tpY = Math.max(0.1, avgY - 0.2);
   const tpHit = filledDca.length >= 3 && u >= 0.78 && dcaPrice(u) <= tpY + 0.03;
 
-  const buyYs = [0.58, 0.71, 0.84];
-  const sellOffset = 0.09;
-  const buyFillAt = [0.18, 0.38, 0.58];
-  const gridDoneAt = 0.72;
+  // ——— Grid ———
+  // Buy ladder (higher y = lower price on chart)
+  const buyYs = [0.56, 0.68, 0.8];
+  const sellOffset = 0.1;
+  const sellYs = buyYs.map((y) => y - sellOffset); // above each buy
+
+  // Timeline within grid phase u ∈ [0,1]
+  const buyFillAt = [0.12, 0.24, 0.36];
+  const turnAt = 0.44; // start rising
+  const sellFillAt = [0.52, 0.64, 0.76]; // deepest sell first (highest y), then up
+  // sell order: fill lowest sell first (sellYs[2]), then [1], then [0]
+  const sellOrder = [2, 1, 0];
 
   const gridPrice = (x: number) => {
-    const xClamped = Math.min(x, gridDoneAt);
-    if (xClamped < 0.1) return 0.4;
-    if (xClamped < buyFillAt[0]) {
-      const k = (xClamped - 0.1) / (buyFillAt[0] - 0.1);
-      return 0.4 + k * (buyYs[0] - 0.4);
+    // continuous piecewise path — no hold plateau that can “shake”
+    if (x <= buyFillAt[0]) {
+      return lerp(0.38, buyYs[0], x / buyFillAt[0]);
     }
-    if (xClamped < buyFillAt[1]) {
-      const k = (xClamped - buyFillAt[0]) / (buyFillAt[1] - buyFillAt[0]);
-      return buyYs[0] + k * (buyYs[1] - buyYs[0]);
+    if (x <= buyFillAt[1]) {
+      return lerp(
+        buyYs[0],
+        buyYs[1],
+        (x - buyFillAt[0]) / (buyFillAt[1] - buyFillAt[0])
+      );
     }
-    if (xClamped < buyFillAt[2]) {
-      const k = (xClamped - buyFillAt[1]) / (buyFillAt[2] - buyFillAt[1]);
-      return buyYs[1] + k * (buyYs[2] - buyYs[1]);
+    if (x <= buyFillAt[2]) {
+      return lerp(
+        buyYs[1],
+        buyYs[2],
+        (x - buyFillAt[1]) / (buyFillAt[2] - buyFillAt[1])
+      );
     }
-    return buyYs[2] + 0.02;
+    if (x <= turnAt) {
+      // short smooth dip past last buy
+      return lerp(buyYs[2], buyYs[2] + 0.04, (x - buyFillAt[2]) / (turnAt - buyFillAt[2]));
+    }
+    // rise through sells: bottom → sellYs[2] → sellYs[1] → sellYs[0] → slightly above
+    if (x <= sellFillAt[0]) {
+      return lerp(
+        buyYs[2] + 0.04,
+        sellYs[2],
+        (x - turnAt) / (sellFillAt[0] - turnAt)
+      );
+    }
+    if (x <= sellFillAt[1]) {
+      return lerp(
+        sellYs[2],
+        sellYs[1],
+        (x - sellFillAt[0]) / (sellFillAt[1] - sellFillAt[0])
+      );
+    }
+    if (x <= sellFillAt[2]) {
+      return lerp(
+        sellYs[1],
+        sellYs[0],
+        (x - sellFillAt[1]) / (sellFillAt[2] - sellFillAt[1])
+      );
+    }
+    // calm finish above top sell — flat, no oscillation
+    return lerp(sellYs[0], sellYs[0] - 0.06, (x - sellFillAt[2]) / (1 - sellFillAt[2]));
   };
 
   type GLevel = { y: number; kind: 'buy' | 'sell'; flash: boolean };
   const levels: GLevel[] = [];
+
   for (let i = 0; i < 3; i++) {
-    const buyY = buyYs[i];
-    const sellY = buyY - sellOffset;
-    if (u < buyFillAt[i]) {
+    const buyFilled = u >= buyFillAt[i];
+    // sell index in sellFillAt for this slot: slot 2 fills first
+    const sellIdx = sellOrder.indexOf(i);
+    const sellFilled = u >= sellFillAt[sellIdx];
+
+    if (!buyFilled) {
       levels.push({
-        y: buyY,
+        y: buyYs[i],
         kind: 'buy',
-        flash: u >= buyFillAt[i] - 0.04 && u < buyFillAt[i],
+        flash: u >= buyFillAt[i] - 0.035 && u < buyFillAt[i],
       });
-    } else {
+    } else if (!sellFilled) {
       levels.push({
-        y: sellY,
+        y: sellYs[i],
         kind: 'sell',
-        flash: u >= buyFillAt[i] && u < buyFillAt[i] + 0.05,
+        flash: u >= sellFillAt[sellIdx] - 0.035 && u < sellFillAt[sellIdx],
       });
     }
+    // after sell filled → level gone
   }
 
   const priceFn = dcaPhase ? dcaPrice : gridPrice;
-  const drawU = dcaPhase ? u : Math.min(u, gridDoneAt);
-  const maxX = Math.max(0.02, drawU);
+  const maxX = Math.max(0.02, u);
   const linePts: string[] = [];
   const areaPts: string[] = [`${padX},${padY + cH}`];
-  for (let i = 0; i <= 90; i++) {
-    const x = (i / 90) * maxX;
+  for (let i = 0; i <= 100; i++) {
+    const x = (i / 100) * maxX;
     const px = padX + x * cW;
     const py = padY + priceFn(x) * cH;
     linePts.push(`${px},${py}`);
     areaPts.push(`${px},${py}`);
   }
   areaPts.push(`${padX + maxX * cW},${padY + cH}`);
-  const cx = padX + drawU * cW;
-  const cy = padY + priceFn(drawU) * cH;
+  const cx = padX + u * cW;
+  const cy = padY + priceFn(u) * cH;
 
-  const fillMarkers: { x: number; y: number }[] = [];
+  const fillMarkers: { x: number; y: number; kind: 'buy' | 'sell' }[] = [];
   if (!dcaPhase) {
     buyFillAt.forEach((ft, i) => {
-      if (u >= ft && u < ft + 0.06) fillMarkers.push({ x: ft, y: buyYs[i] });
+      if (u >= ft && u < ft + 0.05) {
+        fillMarkers.push({ x: ft, y: buyYs[i], kind: 'buy' });
+      }
+    });
+    sellFillAt.forEach((ft, si) => {
+      const slot = sellOrder[si];
+      if (u >= ft && u < ft + 0.05) {
+        fillMarkers.push({ x: ft, y: sellYs[slot], kind: 'sell' });
+      }
     });
   }
 
@@ -417,6 +480,7 @@ function BotsDemo({ active }: { active: boolean }) {
           />
         ))}
         <polygon points={areaPts.join(' ')} fill="url(#hqAreaBots)" />
+
         {dcaPhase && filledDca.length > 0 && (
           <>
             <line
@@ -445,6 +509,7 @@ function BotsDemo({ active }: { active: boolean }) {
             </text>
           </>
         )}
+
         {dcaPhase &&
           dcaBuyTimes.map((bt, i) =>
             u >= bt ? (
@@ -462,11 +527,13 @@ function BotsDemo({ active }: { active: boolean }) {
               </g>
             ) : null
           )}
+
         {dcaPhase && tpHit && (
           <text x={cx + 6} y={cy - 8} fill="#3fb950" fontSize={10} fontWeight={700}>
             TAKE
           </text>
         )}
+
         {!dcaPhase &&
           levels.map((lv, i) => (
             <g key={i}>
@@ -498,6 +565,7 @@ function BotsDemo({ active }: { active: boolean }) {
               </text>
             </g>
           ))}
+
         {!dcaPhase &&
           fillMarkers.map((m, i) => (
             <circle
@@ -505,16 +573,18 @@ function BotsDemo({ active }: { active: boolean }) {
               cx={padX + m.x * cW}
               cy={padY + m.y * cH}
               r={5}
-              fill="#2ee6c5"
+              fill={m.kind === 'buy' ? '#2ee6c5' : '#f85149'}
               opacity={0.95}
             />
           ))}
+
         <polyline
           points={linePts.join(' ')}
           fill="none"
           stroke="#2ee6c5"
           strokeWidth={2}
           strokeLinejoin="round"
+          strokeLinecap="round"
         />
         <circle cx={cx} cy={cy} r={3.5} fill="#5ef0d4" />
       </svg>
@@ -857,7 +927,6 @@ export default function Home() {
   const [status, setStatus] = useState<string | null>(null);
   const [statusWarn, setStatusWarn] = useState(false);
   const [sessionDone, setSessionDone] = useState(false);
-  /** Visual only: 0 idle, 1 agent, 2 builder, 3 abstraction */
   const [step, setStep] = useState(0);
   const [accountInfo, setAccountInfo] = useState<AccountInfo>({
     balance: null,
@@ -1139,7 +1208,7 @@ export default function Home() {
         );
       } else {
         setStatusWarn(false);
-        setStatus('Activated successfully. You can return to Telegram.');
+        setStatus('Connected successfully. You can return to Telegram.');
       }
     } catch (e: unknown) {
       setStatusWarn(false);
@@ -1199,7 +1268,6 @@ export default function Home() {
     >
       <style>{CSS_VARS}</style>
 
-      {/* ambient + subtle noise */}
       <div
         aria-hidden
         style={{
@@ -1246,7 +1314,8 @@ export default function Home() {
             width: '42%',
             height: 2,
             borderRadius: '0 0 2px 2px',
-            background: 'linear-gradient(90deg, transparent, var(--hq-accent), var(--hq-accent-2), transparent)',
+            background:
+              'linear-gradient(90deg, transparent, var(--hq-accent), var(--hq-accent-2), transparent)',
             opacity: 0.75,
           }}
         />
@@ -1472,14 +1541,7 @@ export default function Home() {
                   </span>
                 </div>
                 {insufficientFunds && (
-                  <p
-                    style={{
-                      margin: 0,
-                      color: 'var(--hq-warn)',
-                      fontWeight: 600,
-                      fontSize: 13,
-                    }}
-                  >
+                  <p style={{ margin: 0, color: 'var(--hq-warn)', fontWeight: 600, fontSize: 13 }}>
                     Insufficient funds (less than ${MIN_BALANCE_USD})
                   </p>
                 )}
@@ -1523,11 +1585,10 @@ export default function Home() {
               {loading
                 ? 'Processing...'
                 : sessionDone
-                  ? 'Already activated'
-                  : 'Activate Hyper Quant'}
+                  ? 'Already connected'
+                  : 'Connect exchange'}
             </button>
 
-            {/* Visual progress only — does not change signing flow */}
             {loading && step > 0 && (
               <div style={{ marginTop: 14 }}>
                 <div
@@ -1541,9 +1602,7 @@ export default function Home() {
                     letterSpacing: '0.04em',
                   }}
                 >
-                  <span>
-                    Step {step}/3
-                  </span>
+                  <span>Step {step}/3</span>
                   <span>
                     {step === 1 ? 'Agent' : step === 2 ? 'Builder fee' : 'Unified account'}
                   </span>
