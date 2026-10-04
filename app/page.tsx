@@ -98,6 +98,40 @@ type AccountInfo = {
   error: string | null;
 };
 
+const CSS_VARS = `
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+  :root {
+    --hq-bg: #0b0e14;
+    --hq-card: #12161d;
+    --hq-card-2: #0e1218;
+    --hq-border: rgba(255, 255, 255, 0.06);
+    --hq-accent: #2ee6c5;
+    --hq-accent-2: #5ef0d4;
+    --hq-text: #e6edf3;
+    --hq-muted: #8b949e;
+    --hq-dim: #6e7681;
+    --hq-ok: #3fb950;
+    --hq-err: #f85149;
+    --hq-warn: #e3b341;
+    --hq-font: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --hq-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace;
+  }
+
+  @keyframes hqPulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(63, 185, 80, 0.7); transform: scale(1); }
+    50% { opacity: 0.35; box-shadow: 0 0 2px rgba(63, 185, 80, 0.25); transform: scale(0.85); }
+  }
+  @keyframes hqSkeleton {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
+  @keyframes hqFadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+`;
+
 function CheckIcon({ ok }: { ok: boolean }) {
   return (
     <span
@@ -107,12 +141,12 @@ function CheckIcon({ ok }: { ok: boolean }) {
         justifyContent: 'center',
         width: 18,
         height: 18,
-        borderRadius: 4,
-        fontSize: 12,
+        borderRadius: 5,
+        fontSize: 11,
         fontWeight: 700,
         flexShrink: 0,
         background: ok ? 'rgba(63, 185, 80, 0.15)' : 'rgba(248, 81, 73, 0.15)',
-        color: ok ? '#3fb950' : '#f85149',
+        color: ok ? 'var(--hq-ok)' : 'var(--hq-err)',
       }}
       aria-hidden
     >
@@ -121,12 +155,28 @@ function CheckIcon({ ok }: { ok: boolean }) {
   );
 }
 
+function SkeletonLine({ w = '100%' }: { w?: string }) {
+  return (
+    <div
+      style={{
+        height: 12,
+        width: w,
+        borderRadius: 6,
+        background:
+          'linear-gradient(90deg, #1a1f27 0%, #252b36 50%, #1a1f27 100%)',
+        backgroundSize: '200% 100%',
+        animation: 'hqSkeleton 1.2s ease-in-out infinite',
+      }}
+    />
+  );
+}
+
 function isAbstractionOk(mode: string | null) {
   return mode === 'unifiedAccount';
 }
 
 const hl = (text: string) => (
-  <span style={{ color: '#2ee6c5', fontWeight: 700 }}>{text}</span>
+  <span style={{ color: 'var(--hq-accent)', fontWeight: 700 }}>{text}</span>
 );
 
 type FaqItem = {
@@ -166,10 +216,10 @@ const FAQ_ITEMS: FaqItem[] = [
         trade on your behalf. We never hold your funds or private keys.{' '}
         <span
           style={{
-            color: '#e6edf3',
+            color: 'var(--hq-text)',
             fontWeight: 600,
             background: 'rgba(46, 230, 197, 0.1)',
-            borderLeft: '2px solid #2ee6c5',
+            borderLeft: '2px solid var(--hq-accent)',
             padding: '2px 8px',
             borderRadius: 4,
           }}
@@ -194,7 +244,6 @@ const FAQ_ITEMS: FaqItem[] = [
   },
 ];
 
-/** DCA then Grid (ends when all buys filled + sells placed), loop ~12s */
 function BotsDemo({ active }: { active: boolean }) {
   const [t, setT] = useState(0);
   const raf = useRef(0);
@@ -279,7 +328,6 @@ function BotsDemo({ active }: { active: boolean }) {
 
   type GLevel = { y: number; kind: 'buy' | 'sell'; flash: boolean };
   const levels: GLevel[] = [];
-
   for (let i = 0; i < 3; i++) {
     const buyY = buyYs[i];
     const sellY = buyY - sellOffset;
@@ -301,20 +349,23 @@ function BotsDemo({ active }: { active: boolean }) {
   const priceFn = dcaPhase ? dcaPrice : gridPrice;
   const drawU = dcaPhase ? u : Math.min(u, gridDoneAt);
   const maxX = Math.max(0.02, drawU);
-  const pts: string[] = [];
+  const linePts: string[] = [];
+  const areaPts: string[] = [`${padX},${padY + cH}`];
   for (let i = 0; i <= 90; i++) {
     const x = (i / 90) * maxX;
-    pts.push(`${padX + x * cW},${padY + priceFn(x) * cH}`);
+    const px = padX + x * cW;
+    const py = padY + priceFn(x) * cH;
+    linePts.push(`${px},${py}`);
+    areaPts.push(`${px},${py}`);
   }
+  areaPts.push(`${padX + maxX * cW},${padY + cH}`);
   const cx = padX + drawU * cW;
   const cy = padY + priceFn(drawU) * cH;
 
   const fillMarkers: { x: number; y: number }[] = [];
   if (!dcaPhase) {
     buyFillAt.forEach((ft, i) => {
-      if (u >= ft && u < ft + 0.06) {
-        fillMarkers.push({ x: ft, y: buyYs[i] });
-      }
+      if (u >= ft && u < ft + 0.06) fillMarkers.push({ x: ft, y: buyYs[i] });
     });
   }
 
@@ -322,8 +373,8 @@ function BotsDemo({ active }: { active: boolean }) {
     <div
       style={{
         marginTop: 12,
-        borderRadius: 12,
-        border: '1px solid rgba(46, 230, 197, 0.25)',
+        borderRadius: 14,
+        border: '1px solid var(--hq-border)',
         background: 'linear-gradient(160deg, #0d1117 0%, #0a0e14 100%)',
         overflow: 'hidden',
       }}
@@ -332,23 +383,29 @@ function BotsDemo({ active }: { active: boolean }) {
         style={{
           display: 'flex',
           justifyContent: 'center',
-          padding: '8px 12px',
-          borderBottom: '1px solid #21262d',
+          padding: '10px 12px',
+          borderBottom: '1px solid rgba(255,255,255,0.04)',
         }}
       >
         <span
           style={{
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: 700,
-            letterSpacing: '0.08em',
+            letterSpacing: '0.12em',
             textTransform: 'uppercase',
-            color: '#2ee6c5',
+            color: 'var(--hq-accent)',
           }}
         >
           {dcaPhase ? 'DCA' : 'Grid'}
         </span>
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+        <defs>
+          <linearGradient id="hqAreaBots" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#2ee6c5" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#2ee6c5" stopOpacity="0" />
+          </linearGradient>
+        </defs>
         {[0.25, 0.5, 0.75].map((g) => (
           <line
             key={g}
@@ -356,10 +413,10 @@ function BotsDemo({ active }: { active: boolean }) {
             x2={W - padX}
             y1={padY + g * cH}
             y2={padY + g * cH}
-            stroke="#21262d"
+            stroke="rgba(255,255,255,0.04)"
           />
         ))}
-
+        <polygon points={areaPts.join(' ')} fill="url(#hqAreaBots)" />
         {dcaPhase && filledDca.length > 0 && (
           <>
             <line
@@ -371,13 +428,7 @@ function BotsDemo({ active }: { active: boolean }) {
               strokeDasharray="4 3"
               strokeWidth={1.5}
             />
-            <text
-              x={W - padX - 2}
-              y={padY + avgY * cH - 4}
-              fill="#e3b341"
-              fontSize={9}
-              textAnchor="end"
-            >
+            <text x={W - padX - 2} y={padY + avgY * cH - 4} fill="#e3b341" fontSize={9} textAnchor="end">
               AVG
             </text>
             <line
@@ -389,28 +440,16 @@ function BotsDemo({ active }: { active: boolean }) {
               strokeDasharray="4 3"
               strokeWidth={1.5}
             />
-            <text
-              x={W - padX - 2}
-              y={padY + tpY * cH - 4}
-              fill="#3fb950"
-              fontSize={9}
-              textAnchor="end"
-            >
+            <text x={W - padX - 2} y={padY + tpY * cH - 4} fill="#3fb950" fontSize={9} textAnchor="end">
               TP
             </text>
           </>
         )}
-
         {dcaPhase &&
           dcaBuyTimes.map((bt, i) =>
             u >= bt ? (
               <g key={i}>
-                <circle
-                  cx={padX + bt * cW}
-                  cy={padY + dcaBuyPrices[i] * cH}
-                  r={4.5}
-                  fill="#2ee6c5"
-                />
+                <circle cx={padX + bt * cW} cy={padY + dcaBuyPrices[i] * cH} r={4.5} fill="#2ee6c5" />
                 <text
                   x={padX + bt * cW + 6}
                   y={padY + dcaBuyPrices[i] * cH + 3}
@@ -423,13 +462,11 @@ function BotsDemo({ active }: { active: boolean }) {
               </g>
             ) : null
           )}
-
         {dcaPhase && tpHit && (
           <text x={cx + 6} y={cy - 8} fill="#3fb950" fontSize={10} fontWeight={700}>
             TAKE
           </text>
         )}
-
         {!dcaPhase &&
           levels.map((lv, i) => (
             <g key={i}>
@@ -461,7 +498,6 @@ function BotsDemo({ active }: { active: boolean }) {
               </text>
             </g>
           ))}
-
         {!dcaPhase &&
           fillMarkers.map((m, i) => (
             <circle
@@ -473,9 +509,8 @@ function BotsDemo({ active }: { active: boolean }) {
               opacity={0.95}
             />
           ))}
-
         <polyline
-          points={pts.join(' ')}
+          points={linePts.join(' ')}
           fill="none"
           stroke="#2ee6c5"
           strokeWidth={2}
@@ -525,13 +560,17 @@ function QuantBotDemo({ active }: { active: boolean }) {
   const chartW = W - padX * 2;
   const chartH = H - padY * 2;
 
-  const pts: string[] = [];
-  const steps = 80;
   const maxU = Math.max(0.02, t);
-  for (let i = 0; i <= steps; i++) {
-    const u = (i / steps) * maxU;
-    pts.push(`${padX + u * chartW},${padY + priceAt(u) * chartH}`);
+  const linePts: string[] = [];
+  const areaPts: string[] = [`${padX},${padY + chartH}`];
+  for (let i = 0; i <= 80; i++) {
+    const u = (i / 80) * maxU;
+    const px = padX + u * chartW;
+    const py = padY + priceAt(u) * chartH;
+    linePts.push(`${px},${py}`);
+    areaPts.push(`${px},${py}`);
   }
+  areaPts.push(`${padX + maxU * chartW},${padY + chartH}`);
 
   const cx = padX + t * chartW;
   const cy = padY + priceAt(t) * chartH;
@@ -562,8 +601,8 @@ function QuantBotDemo({ active }: { active: boolean }) {
     <div
       style={{
         marginTop: 12,
-        borderRadius: 12,
-        border: '1px solid rgba(46, 230, 197, 0.25)',
+        borderRadius: 14,
+        border: '1px solid var(--hq-border)',
         background: 'linear-gradient(160deg, #0d1117 0%, #0a0e14 100%)',
         overflow: 'hidden',
       }}
@@ -572,25 +611,31 @@ function QuantBotDemo({ active }: { active: boolean }) {
         style={{
           display: 'flex',
           justifyContent: 'space-between',
-          padding: '8px 12px',
-          borderBottom: '1px solid #21262d',
+          padding: '10px 12px',
+          borderBottom: '1px solid rgba(255,255,255,0.04)',
         }}
       >
         <span
           style={{
             fontSize: 11,
             fontWeight: 700,
-            letterSpacing: '0.06em',
+            letterSpacing: '0.08em',
             textTransform: 'uppercase',
-            color: '#2ee6c5',
+            color: 'var(--hq-accent)',
           }}
         >
           Quant Bot · live sim
         </span>
-        <span style={{ fontSize: 10, color: '#6e7681' }}>demo</span>
+        <span style={{ fontSize: 10, color: 'var(--hq-dim)' }}>demo</span>
       </div>
       <div style={{ display: 'flex' }}>
         <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ flex: 1, minWidth: 0 }}>
+          <defs>
+            <linearGradient id="hqAreaQ" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#2ee6c5" stopOpacity="0.22" />
+              <stop offset="100%" stopColor="#2ee6c5" stopOpacity="0" />
+            </linearGradient>
+          </defs>
           {[0.25, 0.5, 0.75].map((g) => (
             <line
               key={g}
@@ -598,11 +643,12 @@ function QuantBotDemo({ active }: { active: boolean }) {
               x2={W - padX}
               y1={padY + g * chartH}
               y2={padY + g * chartH}
-              stroke="#21262d"
+              stroke="rgba(255,255,255,0.04)"
             />
           ))}
+          <polygon points={areaPts.join(' ')} fill="url(#hqAreaQ)" />
           <polyline
-            points={pts.join(' ')}
+            points={linePts.join(' ')}
             fill="none"
             stroke="#2ee6c5"
             strokeWidth={2}
@@ -648,7 +694,7 @@ function QuantBotDemo({ active }: { active: boolean }) {
           style={{
             width: 118,
             flexShrink: 0,
-            borderLeft: '1px solid #21262d',
+            borderLeft: '1px solid rgba(255,255,255,0.04)',
             padding: '8px',
             background: '#0a0d12',
             display: 'flex',
@@ -656,7 +702,7 @@ function QuantBotDemo({ active }: { active: boolean }) {
             gap: 4,
           }}
         >
-          <div style={{ fontSize: 9, color: '#6e7681', fontWeight: 600, marginBottom: 2 }}>
+          <div style={{ fontSize: 9, color: 'var(--hq-dim)', fontWeight: 600, marginBottom: 2 }}>
             SIGNALS
           </div>
           {(t < 0.5 ? sellSignals : buySignals).map((s) => {
@@ -675,7 +721,7 @@ function QuantBotDemo({ active }: { active: boolean }) {
                       ? 'rgba(248,81,73,0.12)'
                       : 'rgba(63,185,80,0.12)'
                     : 'transparent',
-                  color: on ? (bearish ? '#ff7b72' : '#7ee787') : '#6e7681',
+                  color: on ? (bearish ? '#ff7b72' : '#7ee787') : 'var(--hq-dim)',
                   border: on
                     ? `1px solid ${bearish ? 'rgba(248,81,73,0.35)' : 'rgba(63,185,80,0.35)'}`
                     : '1px solid transparent',
@@ -697,33 +743,34 @@ function FaqAccordion() {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
 
   return (
-    <div style={{ marginTop: 28, width: '100%', maxWidth: 420, textAlign: 'left' }}>
+    <div style={{ marginTop: 32, width: '100%', maxWidth: 420, textAlign: 'left' }}>
       <h2
         style={{
           margin: '0 0 14px',
-          fontSize: 15,
+          fontSize: 12,
           fontWeight: 700,
-          letterSpacing: '0.04em',
+          letterSpacing: '0.14em',
           textTransform: 'uppercase',
-          color: '#8b949e',
+          color: 'var(--hq-dim)',
           textAlign: 'center',
+          fontFamily: 'var(--hq-font)',
         }}
       >
         FAQ
       </h2>
       <div
         style={{
-          borderRadius: 14,
-          border: '1px solid rgba(48, 54, 61, 0.95)',
+          borderRadius: 16,
+          border: '1px solid var(--hq-border)',
           background: 'linear-gradient(165deg, #161b22 0%, #0f1318 100%)',
           overflow: 'hidden',
-          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.35)',
+          boxShadow: '0 16px 48px rgba(0, 0, 0, 0.4)',
         }}
       >
         {FAQ_ITEMS.map((item, i) => {
           const open = openIndex === i;
           return (
-            <div key={item.q} style={{ borderTop: i === 0 ? 'none' : '1px solid #21262d' }}>
+            <div key={item.q} style={{ borderTop: i === 0 ? 'none' : '1px solid rgba(255,255,255,0.04)' }}>
               <button
                 type="button"
                 onClick={() => setOpenIndex(open ? null : i)}
@@ -734,16 +781,17 @@ function FaqAccordion() {
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   gap: 12,
-                  padding: '14px 16px',
-                  background: open ? 'rgba(46, 230, 197, 0.06)' : 'transparent',
+                  padding: '15px 16px',
+                  background: open ? 'rgba(46, 230, 197, 0.05)' : 'transparent',
                   border: 'none',
                   cursor: 'pointer',
                   textAlign: 'left',
-                  color: '#e6edf3',
+                  color: 'var(--hq-text)',
                   fontSize: 14,
                   fontWeight: 600,
                   lineHeight: 1.4,
-                  fontFamily: 'inherit',
+                  fontFamily: 'var(--hq-font)',
+                  transition: 'background 0.2s',
                 }}
               >
                 <span>{item.q}</span>
@@ -757,25 +805,33 @@ function FaqAccordion() {
                     alignItems: 'center',
                     justifyContent: 'center',
                     background: open ? 'rgba(46, 230, 197, 0.18)' : 'rgba(48, 54, 61, 0.8)',
-                    color: open ? '#2ee6c5' : '#8b949e',
+                    color: open ? 'var(--hq-accent)' : 'var(--hq-muted)',
                     fontSize: 16,
                     fontWeight: 700,
                     transform: open ? 'rotate(45deg)' : 'none',
-                    transition: 'transform 0.2s',
+                    transition: 'transform 0.25s ease, background 0.2s',
                   }}
                   aria-hidden
                 >
                   +
                 </span>
               </button>
-              {open && (
+              <div
+                style={{
+                  maxHeight: open ? 900 : 0,
+                  overflow: 'hidden',
+                  transition: 'max-height 0.35s ease',
+                }}
+              >
                 <div style={{ padding: '0 16px 16px' }}>
                   <div
                     style={{
-                      color: '#8b949e',
+                      color: 'var(--hq-muted)',
                       fontSize: 13,
-                      lineHeight: 1.55,
+                      lineHeight: 1.6,
+                      fontFamily: 'var(--hq-font)',
                       whiteSpace: typeof item.a === 'string' ? 'pre-line' : undefined,
+                      animation: open ? 'hqFadeIn 0.25s ease' : undefined,
                     }}
                   >
                     {item.a}
@@ -783,7 +839,7 @@ function FaqAccordion() {
                   {item.demo === 'quant' && <QuantBotDemo active={open} />}
                   {item.demo === 'bots' && <BotsDemo active={open} />}
                 </div>
-              )}
+              </div>
             </div>
           );
         })}
@@ -801,6 +857,8 @@ export default function Home() {
   const [status, setStatus] = useState<string | null>(null);
   const [statusWarn, setStatusWarn] = useState(false);
   const [sessionDone, setSessionDone] = useState(false);
+  /** Visual only: 0 idle, 1 agent, 2 builder, 3 abstraction */
+  const [step, setStep] = useState(0);
   const [accountInfo, setAccountInfo] = useState<AccountInfo>({
     balance: null,
     agent: null,
@@ -891,6 +949,7 @@ export default function Home() {
     }
     setLoading(true);
     setStatusWarn(false);
+    setStep(1);
     setStatus('Generating trading agent...');
 
     let stage:
@@ -910,6 +969,7 @@ export default function Home() {
       const abstractionNonce = agentNonce + 2;
 
       stage = 'agent_sign';
+      setStep(1);
       setStatus('Sign agent approval in your wallet (1/3)...');
       const agentAction = {
         type: 'approveAgent',
@@ -949,6 +1009,7 @@ export default function Home() {
       await fetchAccountInfo(address);
 
       stage = 'builder_sign';
+      setStep(2);
       setStatus('Sign builder fee approval in your wallet (2/3)...');
       const builderAction = {
         type: 'approveBuilderFee',
@@ -997,6 +1058,7 @@ export default function Home() {
       await fetchAccountInfo(address);
 
       stage = 'abstraction_sign';
+      setStep(3);
       setStatus('Sign unified account abstraction in your wallet (3/3)...');
       const abstractionAction = {
         type: 'userSetAbstraction',
@@ -1069,6 +1131,7 @@ export default function Home() {
 
       const bal = await fetchAccountInfo(address);
       setSessionDone(true);
+      setStep(0);
       if (bal !== null && bal < MIN_BALANCE_USD) {
         setStatusWarn(true);
         setStatus(
@@ -1080,6 +1143,7 @@ export default function Home() {
       }
     } catch (e: unknown) {
       setStatusWarn(false);
+      setStep(0);
       const message = e instanceof Error ? e.message : 'Something went wrong';
       if (message.startsWith('Error#')) {
         setStatus(message);
@@ -1114,6 +1178,8 @@ export default function Home() {
   const agentOk = !!accountInfo.agent;
   const abstractionOk = isAbstractionOk(accountInfo.abstraction);
   const activateDisabled = loading || sessionDone;
+  const showSkeleton =
+    accountInfo.loading && !accountInfo.agent && accountInfo.balance === null;
 
   return (
     <main
@@ -1123,12 +1189,17 @@ export default function Home() {
         alignItems: 'center',
         justifyContent: 'center',
         minHeight: '100vh',
-        padding: '24px 16px 48px',
+        padding: '28px 16px 56px',
         boxSizing: 'border-box',
+        fontFamily: 'var(--hq-font)',
         background:
-          'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(46, 230, 197, 0.12), transparent), #0b0e14',
+          'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(46, 230, 197, 0.1), transparent), var(--hq-bg)',
+        color: 'var(--hq-text)',
       }}
     >
+      <style>{CSS_VARS}</style>
+
+      {/* ambient + subtle noise */}
       <div
         aria-hidden
         style={{
@@ -1136,7 +1207,18 @@ export default function Home() {
           inset: 0,
           pointerEvents: 'none',
           background:
-            'radial-gradient(circle at 20% 80%, rgba(94, 240, 212, 0.06), transparent 40%), radial-gradient(circle at 80% 20%, rgba(46, 230, 197, 0.05), transparent 35%)',
+            'radial-gradient(circle at 20% 80%, rgba(94, 240, 212, 0.05), transparent 40%), radial-gradient(circle at 80% 20%, rgba(46, 230, 197, 0.04), transparent 35%)',
+        }}
+      />
+      <div
+        aria-hidden
+        style={{
+          position: 'fixed',
+          inset: 0,
+          pointerEvents: 'none',
+          opacity: 0.035,
+          backgroundImage:
+            'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.85\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")',
         }}
       />
 
@@ -1144,14 +1226,14 @@ export default function Home() {
         style={{
           position: 'relative',
           background: 'linear-gradient(165deg, #161b22 0%, #0f1318 100%)',
-          border: '1px solid rgba(48, 54, 61, 0.9)',
-          borderRadius: '20px',
+          border: '1px solid var(--hq-border)',
+          borderRadius: 24,
           padding: '40px 28px 36px',
-          maxWidth: '420px',
+          maxWidth: 420,
           width: '100%',
           textAlign: 'center',
           boxShadow:
-            '0 0 0 1px rgba(46, 230, 197, 0.04), 0 20px 50px rgba(0, 0, 0, 0.45), 0 0 80px rgba(46, 230, 197, 0.04)',
+            '0 0 0 1px rgba(46, 230, 197, 0.03), 0 24px 80px rgba(0, 0, 0, 0.5), 0 0 60px rgba(46, 230, 197, 0.03)',
         }}
       >
         <div
@@ -1161,24 +1243,24 @@ export default function Home() {
             top: 0,
             left: '50%',
             transform: 'translateX(-50%)',
-            width: '40%',
-            height: '2px',
+            width: '42%',
+            height: 2,
             borderRadius: '0 0 2px 2px',
-            background: 'linear-gradient(90deg, transparent, #2ee6c5, #5ef0d4, transparent)',
-            opacity: 0.7,
+            background: 'linear-gradient(90deg, transparent, var(--hq-accent), var(--hq-accent-2), transparent)',
+            opacity: 0.75,
           }}
         />
 
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 22 }}>
           <div
             style={{
-              width: 64,
-              height: 64,
-              borderRadius: 16,
+              width: 68,
+              height: 68,
+              borderRadius: 18,
               overflow: 'hidden',
-              border: '1px solid rgba(46, 230, 197, 0.35)',
+              border: '1px solid rgba(46, 230, 197, 0.3)',
               boxShadow:
-                '0 0 24px rgba(46, 230, 197, 0.18), inset 0 0 0 1px rgba(46, 230, 197, 0.08)',
+                '0 0 28px rgba(46, 230, 197, 0.16), inset 0 0 0 1px rgba(46, 230, 197, 0.06)',
               background: '#05080c',
               display: 'flex',
               alignItems: 'center',
@@ -1188,8 +1270,8 @@ export default function Home() {
             <img
               src="/iconhq.png"
               alt="Hyper Quant"
-              width={56}
-              height={56}
+              width={58}
+              height={58}
               style={{ display: 'block', objectFit: 'contain' }}
             />
           </div>
@@ -1197,11 +1279,11 @@ export default function Home() {
 
         <h1
           style={{
-            fontSize: '26px',
+            fontSize: 28,
             fontWeight: 700,
             margin: '0 0 8px',
-            letterSpacing: '-0.02em',
-            background: 'linear-gradient(90deg, #2ee6c5 0%, #5ef0d4 100%)',
+            letterSpacing: '-0.03em',
+            background: 'linear-gradient(90deg, var(--hq-accent) 0%, var(--hq-accent-2) 100%)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
@@ -1209,20 +1291,28 @@ export default function Home() {
         >
           HYPER QUANT
         </h1>
-        <p style={{ color: '#8b949e', fontSize: '14px', lineHeight: 1.5, margin: '0 0 28px' }}>
-          Algorithmic Trading System
+        <p
+          style={{
+            color: 'var(--hq-muted)',
+            fontSize: 14,
+            lineHeight: 1.5,
+            margin: '0 0 28px',
+            fontWeight: 450,
+          }}
+        >
+          Non-custodial bots on Hyperliquid
         </p>
 
-        <div style={{ textAlign: 'left', marginBottom: '18px' }}>
+        <div style={{ textAlign: 'left', marginBottom: 18 }}>
           <label
             htmlFor="telegram-id"
             style={{
               display: 'block',
-              fontSize: '12px',
+              fontSize: 11,
               fontWeight: 600,
-              color: '#8b949e',
-              marginBottom: '8px',
-              letterSpacing: '0.02em',
+              color: 'var(--hq-dim)',
+              marginBottom: 8,
+              letterSpacing: '0.06em',
               textTransform: 'uppercase',
             }}
           >
@@ -1233,12 +1323,11 @@ export default function Home() {
               aria-hidden
               style={{
                 position: 'absolute',
-                left: '14px',
+                left: 14,
                 top: '50%',
                 transform: 'translateY(-50%)',
                 display: 'flex',
-                alignItems: 'center',
-                color: '#6e7681',
+                color: 'var(--hq-dim)',
               }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -1256,69 +1345,84 @@ export default function Home() {
               style={{
                 width: '100%',
                 boxSizing: 'border-box',
-                padding: '12px 14px 12px 40px',
-                borderRadius: '10px',
-                border: '1px solid #30363d',
+                padding: '13px 14px 13px 40px',
+                borderRadius: 12,
+                border: '1px solid rgba(48, 54, 61, 0.9)',
                 background: '#0d1117',
-                color: '#e6edf3',
-                fontSize: '15px',
+                color: 'var(--hq-text)',
+                fontSize: 15,
+                fontFamily: 'var(--hq-font)',
                 outline: 'none',
+                transition: 'border-color 0.15s, box-shadow 0.15s',
               }}
               onFocus={(e) => {
                 e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.45)';
                 e.currentTarget.style.boxShadow = '0 0 0 3px rgba(46, 230, 197, 0.1)';
               }}
               onBlur={(e) => {
-                e.currentTarget.style.borderColor = '#30363d';
+                e.currentTarget.style.borderColor = 'rgba(48, 54, 61, 0.9)';
                 e.currentTarget.style.boxShadow = 'none';
               }}
             />
           </div>
-          <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#8b949e', lineHeight: 1.5 }}>
-            <span style={{ color: '#e3b341', fontWeight: 600 }}>Note:</span> Enter your Telegram
-            @Nickname if you have an active paid subscription. Leave empty on the free plan — a
-            builder fee of <span style={{ color: '#2ee6c5' }}>0.01%</span> applies (up to{' '}
-            <span style={{ color: '#2ee6c5' }}>0.03%</span> for Quant Bot on DEMO).
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--hq-muted)', lineHeight: 1.5 }}>
+            <span style={{ color: 'var(--hq-warn)', fontWeight: 600 }}>Note:</span> Enter your
+            Telegram @Nickname if you have an active paid subscription. Leave empty on the free
+            plan — a builder fee of <span style={{ color: 'var(--hq-accent)' }}>0.01%</span>{' '}
+            applies (up to <span style={{ color: 'var(--hq-accent)' }}>0.03%</span> for Quant Bot
+            on DEMO).
           </p>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '8px' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
           <ConnectButton label="Connect wallet" showBalance={false} accountStatus="address" />
         </div>
 
         {isConnected && (
           <div
             style={{
-              marginTop: '16px',
-              padding: '14px',
-              borderRadius: '12px',
-              border: '1px solid #30363d',
+              marginTop: 16,
+              padding: '16px 14px',
+              borderRadius: 14,
+              border: '1px solid var(--hq-border)',
               background: '#0d1117',
               textAlign: 'left',
-              fontSize: '13px',
-              lineHeight: 1.45,
+              fontSize: 13,
+              lineHeight: 1.5,
             }}
           >
-            {accountInfo.loading && !accountInfo.agent && accountInfo.balance === null && (
-              <p style={{ margin: 0, color: '#8b949e' }}>Loading account data…</p>
+            {showSkeleton && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <SkeletonLine w="70%" />
+                <SkeletonLine w="55%" />
+                <SkeletonLine w="40%" />
+              </div>
             )}
             {accountInfo.error && (
               <p style={{ margin: 0, color: '#ff7b72' }}>{accountInfo.error}</p>
             )}
-            {!accountInfo.error &&
-              !(accountInfo.loading && !accountInfo.agent && accountInfo.balance === null) && (
+            {!accountInfo.error && !showSkeleton && (
               <>
                 <div
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    marginBottom: 10,
-                    gap: 8,
+                    marginBottom: 12,
+                    gap: 10,
+                    alignItems: 'flex-start',
                   }}
                 >
-                  <span style={{ color: '#8b949e' }}>Agent</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: '#e6edf3', fontSize: 12, wordBreak: 'break-all' }}>
+                  <span style={{ color: 'var(--hq-muted)', flexShrink: 0 }}>Agent</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <span
+                      style={{
+                        color: 'var(--hq-text)',
+                        fontSize: 12,
+                        fontFamily: 'var(--hq-mono)',
+                        wordBreak: 'break-all',
+                        textAlign: 'right',
+                      }}
+                    >
                       {accountInfo.agent
                         ? `${accountInfo.agent.name} · ${accountInfo.agent.address.slice(0, 6)}…${accountInfo.agent.address.slice(-4)}`
                         : 'Not registered'}
@@ -1330,13 +1434,14 @@ export default function Home() {
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    marginBottom: 10,
+                    marginBottom: 12,
                     gap: 8,
+                    alignItems: 'center',
                   }}
                 >
-                  <span style={{ color: '#8b949e' }}>Account type</span>
+                  <span style={{ color: 'var(--hq-muted)' }}>Account type</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: '#e6edf3', fontWeight: 500 }}>
+                    <span style={{ color: 'var(--hq-text)', fontWeight: 500 }}>
                       {accountInfo.abstraction ?? '—'}
                     </span>
                     <CheckIcon ok={abstractionOk} />
@@ -1346,11 +1451,18 @@ export default function Home() {
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    marginBottom: insufficientFunds ? 8 : 0,
+                    marginBottom: insufficientFunds ? 10 : 0,
                   }}
                 >
-                  <span style={{ color: '#8b949e' }}>Balance</span>
-                  <span style={{ color: '#e6edf3', fontWeight: 600 }}>
+                  <span style={{ color: 'var(--hq-muted)' }}>Balance</span>
+                  <span
+                    style={{
+                      color: 'var(--hq-text)',
+                      fontWeight: 600,
+                      fontFamily: 'var(--hq-mono)',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
                     {accountInfo.balance !== null
                       ? `$${accountInfo.balance.toLocaleString(undefined, {
                           minimumFractionDigits: 2,
@@ -1360,7 +1472,14 @@ export default function Home() {
                   </span>
                 </div>
                 {insufficientFunds && (
-                  <p style={{ margin: 0, color: '#e3b341', fontWeight: 600, fontSize: 13 }}>
+                  <p
+                    style={{
+                      margin: 0,
+                      color: 'var(--hq-warn)',
+                      fontWeight: 600,
+                      fontSize: 13,
+                    }}
+                  >
                     Insufficient funds (less than ${MIN_BALANCE_USD})
                   </p>
                 )}
@@ -1370,23 +1489,35 @@ export default function Home() {
         )}
 
         {isConnected && (
-          <div style={{ marginTop: '20px' }}>
+          <div style={{ marginTop: 20 }}>
             <button
               onClick={handleApproveAndActivate}
               disabled={activateDisabled}
               style={{
                 width: '100%',
-                padding: '14px 16px',
-                borderRadius: '10px',
+                padding: '15px 16px',
+                borderRadius: 12,
                 border: 'none',
                 background: activateDisabled
                   ? '#30363d'
-                  : 'linear-gradient(90deg, #2ee6c5 0%, #5ef0d4 100%)',
-                color: activateDisabled ? '#8b949e' : '#0b0e14',
+                  : 'linear-gradient(90deg, var(--hq-accent) 0%, var(--hq-accent-2) 100%)',
+                color: activateDisabled ? 'var(--hq-muted)' : '#0b0e14',
                 fontWeight: 700,
-                fontSize: '15px',
+                fontSize: 15,
+                fontFamily: 'var(--hq-font)',
                 cursor: activateDisabled ? 'not-allowed' : 'pointer',
-                boxShadow: activateDisabled ? 'none' : '0 4px 20px rgba(46, 230, 197, 0.25)',
+                boxShadow: activateDisabled ? 'none' : '0 4px 24px rgba(46, 230, 197, 0.28)',
+                transition: 'opacity 0.15s, transform 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                if (!activateDisabled) {
+                  e.currentTarget.style.opacity = '0.93';
+                  e.currentTarget.style.transform = 'scale(1.012)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.opacity = '1';
+                e.currentTarget.style.transform = 'scale(1)';
               }}
             >
               {loading
@@ -1396,17 +1527,59 @@ export default function Home() {
                   : 'Activate Hyper Quant'}
             </button>
 
+            {/* Visual progress only — does not change signing flow */}
+            {loading && step > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    marginBottom: 6,
+                    fontSize: 11,
+                    color: 'var(--hq-dim)',
+                    fontWeight: 600,
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  <span>
+                    Step {step}/3
+                  </span>
+                  <span>
+                    {step === 1 ? 'Agent' : step === 2 ? 'Builder fee' : 'Unified account'}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    height: 4,
+                    borderRadius: 4,
+                    background: 'rgba(48, 54, 61, 0.9)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${(step / 3) * 100}%`,
+                      borderRadius: 4,
+                      background: 'linear-gradient(90deg, var(--hq-accent), var(--hq-accent-2))',
+                      transition: 'width 0.35s ease',
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
             {status && (
               <p
                 style={{
-                  marginTop: '16px',
+                  marginTop: 16,
                   marginBottom: 0,
-                  fontSize: '13px',
-                  lineHeight: 1.45,
+                  fontSize: 13,
+                  lineHeight: 1.5,
                   color: status.startsWith('Error')
                     ? '#ff7b72'
                     : statusWarn
-                      ? '#e3b341'
+                      ? 'var(--hq-warn)'
                       : '#7ee787',
                   wordBreak: 'break-word',
                 }}
@@ -1425,18 +1598,28 @@ export default function Home() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '10px',
-            marginTop: '22px',
+            gap: 10,
+            marginTop: 22,
             width: '100%',
             boxSizing: 'border-box',
-            padding: '12px 16px',
-            borderRadius: '10px',
-            border: '1px solid rgba(46, 230, 197, 0.35)',
+            padding: '13px 16px',
+            borderRadius: 12,
+            border: '1px solid rgba(46, 230, 197, 0.32)',
             background: 'rgba(46, 230, 197, 0.06)',
-            color: '#2ee6c5',
+            color: 'var(--hq-accent)',
             fontWeight: 600,
-            fontSize: '14px',
+            fontSize: 14,
+            fontFamily: 'var(--hq-font)',
             textDecoration: 'none',
+            transition: 'background 0.15s, border-color 0.15s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(46, 230, 197, 0.12)';
+            e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.5)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'rgba(46, 230, 197, 0.06)';
+            e.currentTarget.style.borderColor = 'rgba(46, 230, 197, 0.32)';
           }}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1447,33 +1630,27 @@ export default function Home() {
 
         <div
           style={{
-            marginTop: '20px',
-            paddingTop: '18px',
-            borderTop: '1px solid #21262d',
+            marginTop: 22,
+            paddingTop: 18,
+            borderTop: '1px solid rgba(255,255,255,0.04)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '8px',
+            gap: 8,
           }}
         >
-          <style>{`
-            @keyframes hqPulse {
-              0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(63, 185, 80, 0.7); transform: scale(1); }
-              50% { opacity: 0.35; box-shadow: 0 0 2px rgba(63, 185, 80, 0.25); transform: scale(0.85); }
-            }
-          `}</style>
           <span
             style={{
-              width: '7px',
-              height: '7px',
+              width: 7,
+              height: 7,
               borderRadius: '50%',
-              background: '#3fb950',
+              background: 'var(--hq-ok)',
               boxShadow: '0 0 8px rgba(63, 185, 80, 0.6)',
               animation: 'hqPulse 1.6s ease-in-out infinite',
               display: 'inline-block',
             }}
           />
-          <span style={{ fontSize: '12px', color: '#6e7681' }}>
+          <span style={{ fontSize: 12, color: 'var(--hq-dim)' }}>
             Secured · Non-custodial · Hyperliquid
           </span>
         </div>
