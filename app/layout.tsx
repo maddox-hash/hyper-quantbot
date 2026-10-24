@@ -2,8 +2,8 @@ import '@rainbow-me/rainbowkit/styles.css';
 import { Providers } from './providers';
 
 export const metadata = {
-  title: 'Hyper Quant — Web3 Connect',
-  description: 'Connect your wallet and activate Hyper Quant copy trading for Hyperliquid',
+  title: 'Hyper Quant (Beta) — Web3 Connect',
+  description: 'Connect your wallet and activate Hyper Quant (Beta) non-custodial bots for Hyperliquid',
 };
 
 export default function RootLayout({
